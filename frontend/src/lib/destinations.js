@@ -39,10 +39,10 @@ export const DEST_GROUPS = [
     title: 'Classrooms',
     items: [
       { value: 'B1_class70', label: '70-seat classroom · Lower level' },
-      { value: 'F1_class24', label: 'Classroom 24 · Floor 1' },
-      { value: 'F1_class48', label: 'Classroom 48 · Floor 1' },
-      { value: 'F2_class20', label: 'Classroom 20 · Floor 2' },
-      { value: 'F2_class48a', label: 'Classroom 48a · Floor 2' },
+      { value: 'F1_class24', label: '24-seat classroom · Floor 1' },
+      { value: 'F1_class48', label: '48-seat classroom · Floor 1' },
+      { value: 'F2_class20', label: '20-seat classroom · Floor 2' },
+      { value: 'F2_class48a', label: '48-seat classroom A · Floor 2' },
     ],
   },
 ]
@@ -85,14 +85,14 @@ export function resolveDestination(input) {
     if (floor) return `${floor.code}_restrooms`
   }
 
-  // "70 seat classroom" / "classroom 24" etc. map to a verified classroom when the
-  // number is one we actually know; otherwise fall through to the backend.
+  // A classroom number means the physical door number, not seating capacity.
+  // Let the private rooms table validate it; never infer its node from class24.
   if (CLASS_WORDS.test(lower)) {
-    const num = lower.match(/\d+[a-z]?/)
-    if (num) {
-      const hit = ALL_DESTS.find((d) => /_class/.test(d.value) && d.value.toLowerCase().endsWith(num[0]))
-      if (hit) return hit.value
-    }
+    const room = lower.match(/^(?:classroom|class\s+room|lecture\s+room)\s+([b]?\d+[a-z]?)$/)
+    if (room) return room[1].toUpperCase()
+    // Capacity descriptions resolve only through the exact curated labels above.
+    // The public suggestion list is incomplete, so a single listed match does not
+    // establish that this is the only classroom with that capacity on its floor.
   }
 
   return raw

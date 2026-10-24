@@ -24,6 +24,9 @@ export function spotName(spot) {
   if (!spot) return 'Unknown spot'
   const parts = String(spot).split('_').slice(1)
   const words = parts.map((p) => {
+    // Walk-sheet classroom IDs encode capacity, not the number on the door.
+    const classroom = p.match(/^class(\d+)([a-z]?)$/)
+    if (classroom) return `${classroom[1]}-seat classroom${classroom[2] ? ` ${classroom[2].toUpperCase()}` : ''}`
     const room = p.match(/^room(\w+)$/)
     if (room) return `Room ${room[1]}`
     const m = p.match(/^([a-z]+)(\d+)$/)
