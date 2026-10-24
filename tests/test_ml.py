@@ -241,6 +241,13 @@ def test_ocr_floor_override_picks_best_on_that_floor():
     assert result['floor'] == 2
     assert result['spot'] == 'F2_c'
     assert result['ocr_room'] == '248' and result['ocr_floor'] == 2
+    # Confidence is reseated to the override winner's honest vote fraction
+    # (F2_c has 1 vote, top_k=10 -> 0.1), still a true votes/k with no x0.5,
+    # so Confirm.jsx's round(confidence*10) meter equals the winner's votes.
+    override_votes = next(t['votes'] for t in result['top3'] if t['spot'] == 'F2_c')
+    assert result['confidence'] == pytest.approx(override_votes / backend.top_k)
+    assert result['confidence'] == pytest.approx(0.1)
+    assert round(result['confidence'] * backend.top_k) == override_votes
 
 
 # --- build_index unit test (tmp_path, not data/) --------------------------

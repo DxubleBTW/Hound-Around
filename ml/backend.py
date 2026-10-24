@@ -90,7 +90,6 @@ class Backend:
                 spot, floor, confidence = self._apply_floor_override(
                     ranked, neighbors, ocr_floor, spot, floor, confidence)
 
-        heading = self._choose_heading(spot)
         return self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
 
     def prepare_correction(self, vector, label) -> VectorIndex:
@@ -110,14 +109,17 @@ class Backend:
 
     # -- helpers ----------------------------------------------------------
     def _apply_floor_override(self, ranked, neighbors, ocr_floor, spot, floor, confidence):
-        """Pick best-voted spot on the OCR floor; lower confidence."""
+        """Pick best-voted spot on the OCR floor; confidence = its votes/k."""
         on_floor = [r for r in ranked if self._floor.get(r['spot']) == ocr_floor]
         if on_floor:
             best = on_floor[0]  # ranked is already votes-desc, sim-desc.
             spot = best['spot']
             floor = ocr_floor
-            # Disagreement means less certainty: halve the confidence.
-            confidence = min(confidence, best['votes'] / self.top_k) * 0.5
+            # Reseat confidence on the override winner's honest vote fraction so
+            # the returned number stays a true votes/k (design.md §4). A
+            # floor-conflict override means the winner's votes are already low,
+            # so the resulting confidence still trips the Confirm.jsx picker.
+            confidence = min(1.0, best['votes'] / self.top_k)
         return spot, floor, confidence
 
     def _choose_heading(self, spot):

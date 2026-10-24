@@ -151,3 +151,21 @@ to start but would not have kept those non-negotiables visible on every change.
   deps and running `docker build`, creating the HF Space + private dataset repo
   + `HF_TOKEN` secret, setting `VITE_API_URL` in Vercel and redeploying, running
   the curl proofs against the deployed Space, and the end-to-end phone demo.
+
+- **Review-driven fix (2026-10-24, APPROVED review follow-up):** the semantic
+  review flagged that the OCR floor-override multiplied `confidence` by `0.5`,
+  so after an override the shown number no longer equalled `winning_votes / k`
+  and `Confirm.jsx`'s `round(confidence * 10)` "N/10 frames agree" meter could
+  round to a misleading `0/10`. Fixed in `ml/backend.py:_apply_floor_override`
+  by reseating `confidence` to the override winner's honest vote fraction
+  (`best_votes / k`), dropping the `× 0.5`. `confidence` is now a true `votes/k`
+  on every path, so the Confirm meter stays truthful with no frontend change —
+  a low override vote count still trips the top-3 picker, preserving the
+  "signals disagree, show the picker" intent. Also removed a dead `heading`
+  local in `locate` (`_result` already recomputes it; behavior identical).
+  Updated `design.md §4` to document the reseated confidence and pinned the
+  override path's confidence in `test_ocr_floor_override_picks_best_on_that_floor`
+  (`confidence == best_votes/k`). `docs/contract.md` left untouched (it remains
+  law); the normal-path invariant `confidence == winning_votes/k` is still
+  covered by `test_confidence_math`. Proof: `.venv/bin/python -m pytest -q` →
+  `49 passed`.

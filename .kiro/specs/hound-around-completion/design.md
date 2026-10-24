@@ -93,8 +93,14 @@ CPU** budget:
   OCR is skipped so `locate` stays fast.
 - **Floor override:** when OCR reads a floor and it disagrees with the winning vote, prefer
   the OCR floor (`docs/roles/ml.md` step 5). Then pick the **best-voted spot on that floor**
-  from the neighbors and **lower confidence** (the vote and OCR disagreed, so the system is
-  less sure). Interpretation: `2xx → F2`, `Bxx → B1`, otherwise `F1`.
+  from the neighbors. The returned `confidence` is reseated to that override winner's own
+  honest vote fraction (`best_votes / 10`), so `confidence` stays a true `votes / 10`
+  value on every path (`docs/contract.md`'s "confidence = winning votes / 10" rule holds,
+  and `Confirm.jsx`'s `round(confidence * 10)` "N/10 frames agree" meter stays truthful).
+  A floor conflict already means the override winner's vote count is low, so the resulting
+  confidence is low enough to trip the top-3 picker — the "signals disagree, show the
+  picker" intent is preserved without inventing a non-`votes/k` number. Interpretation:
+  `2xx → F2`, `Bxx → B1`, otherwise `F1`.
 - `ocr_room`/`ocr_floor` are `null` when nothing is read (`docs/contract.md`). The override
   must still return a `spot` whose node floor equals the returned `floor`, because
   `api/main.py` rejects any result where `nodes[spot].floor != floor`.
