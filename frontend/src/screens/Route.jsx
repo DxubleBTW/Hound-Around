@@ -7,29 +7,39 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
+  const [attempt, setAttempt] = useState(0)
+  const requestKey = JSON.stringify([from, dest.trim(), accessible, heading])
 
   useEffect(() => {
-    route({ from, to: dest.trim(), accessible, heading })
-      .then(setData)
-      .catch((e) => setError(e.message || 'No route found'))
-  }, [from, dest, accessible, heading])
+    let live = true
+    const controller = new AbortController()
+    setData(null)
+    setError('')
+    setI(0)
+    route({ from, to: dest.trim(), accessible, heading }, { signal: controller.signal })
+      .then((result) => live && setData({ key: requestKey, result }))
+      .catch((e) => live && e.name !== 'AbortError' && setError({ key: requestKey, message: e.message || 'No route found' }))
+    return () => { live = false; controller.abort() }
+  }, [from, dest, accessible, heading, requestKey, attempt])
 
-  if (error) {
+  if (error && error.key === requestKey) {
     return (
       <main className="rise flex flex-1 flex-col justify-center text-center">
         <p className="font-display text-2xl font-bold">Couldn’t find a route to {dest}</p>
-        <p className="mt-2 text-sm text-muted">{error}</p>
+        <p role="alert" className="mt-2 text-sm text-muted">{error.message}</p>
+        <button onClick={() => setAttempt((a) => a + 1)} className="mt-6 rounded-2xl border border-line py-4 font-semibold">Try again</button>
         <button onClick={onRestart} className="mt-6 rounded-2xl bg-scarlet py-4 font-semibold text-white">Start over</button>
       </main>
     )
   }
-  if (!data) return <main className="flex flex-1 items-center justify-center text-muted">Planning your route…</main>
+  if (!data || data.key !== requestKey) return <main role="status" className="flex flex-1 items-center justify-center text-muted">Planning your route…</main>
 
-  const steps = data.steps || []
+  const result = data.result
+  const steps = result.steps || []
   const arrived = i >= steps.length
   const step = steps[i]
   const remaining = steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0)
-  const mins = Math.max(1, Math.round((data.est_seconds * (remaining / (data.total_meters || 1))) / 60))
+  const mins = Math.max(1, Math.round((result.est_seconds * (remaining / (result.total_meters || 1))) / 60))
 
   return (
     <main className="rise flex flex-1 flex-col">

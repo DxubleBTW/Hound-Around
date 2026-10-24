@@ -7,12 +7,13 @@ export default function Locating({ photo, onDone, onCancel }) {
 
   useEffect(() => {
     let live = true
+    const controller = new AbortController()
     setError('')
-    locate(photo.blob)
+    locate(photo.blob, { signal: controller.signal })
       .then((r) => live && onDone(r))
-      .catch((e) => live && setError(e.message || 'Something went wrong'))
-    return () => { live = false }
-  }, [attempt]) // eslint-disable-line react-hooks/exhaustive-deps
+      .catch((e) => live && e.name !== 'AbortError' && setError(e.message || 'Please try again.'))
+    return () => { live = false; controller.abort() }
+  }, [photo.blob, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <main className="rise flex flex-1 flex-col">
@@ -22,15 +23,15 @@ export default function Locating({ photo, onDone, onCancel }) {
       </div>
 
       {!error ? (
-        <div className="mt-8 text-center">
+        <div role="status" className="mt-8 text-center">
           <p className="font-display text-2xl font-bold">
-            <span className="sniff inline-block">🐾</span> Sniffing around…
+            <span className="sniff inline-block" aria-hidden="true">🐾</span> Sending photo and matching…
           </p>
-          <p className="mt-2 text-muted">Comparing your photo to thousands of CDS hallway frames.</p>
+          <p className="mt-2 text-muted">This can take a few seconds.</p>
         </div>
       ) : (
-        <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">Couldn’t reach the server</p>
+        <div role="alert" className="mt-8 text-center">
+          <p className="font-display text-2xl font-bold">Couldn’t locate this photo</p>
           <p className="mt-2 break-words text-sm text-muted">{error}</p>
           <button onClick={() => setAttempt((a) => a + 1)} className="mt-6 w-full rounded-2xl bg-scarlet py-4 font-semibold text-white">Try again</button>
         </div>

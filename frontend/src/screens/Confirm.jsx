@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { correct } from '../api.js'
 import { floorName, floorOf, spotName } from '../lib/spots.js'
 
@@ -11,16 +11,27 @@ function needsPicker(loc) {
 export default function Confirm({ photo, loc, onConfirm, onRetake }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
+  const [failure, setFailure] = useState(null)
+  const pending = useRef(null)
   const votes = Math.round((loc.confidence || 0) * 10)
 
+  useEffect(() => () => pending.current?.abort(), [])
+
   async function pick(spot) {
+    if (pending.current) return
     if (spot === loc.spot) return onConfirm(spot, false)
+    const controller = new AbortController()
+    pending.current = controller
+    setFailure(null)
     setSaving(spot)
     try {
-      await correct(loc.photo_id, spot)
-      onConfirm(spot, true)
-    } catch {
-      onConfirm(spot, false) // still route them; the correction just didn't save
+      await correct(loc.photo_id, spot, { signal: controller.signal })
+      if (!controller.signal.aborted) onConfirm(spot, true)
+    } catch (error) {
+      if (!controller.signal.aborted) setFailure({ spot, error })
+    } finally {
+      if (!controller.signal.aborted) setSaving('')
+      if (pending.current === controller) pending.current = null
     }
   }
 
@@ -73,6 +84,24 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
       )}
 
       <div className="mt-auto space-y-3 pt-8">
+        {failure && (
+          <div className="space-y-3 rounded-2xl border border-line bg-white p-4">
+            <div role="alert">
+              <p className="font-semibold">Couldn’t confirm your correction was saved</p>
+              <p className="mt-1 text-sm text-muted">{failure.error.message || 'Please try again.'}</p>
+            </div>
+            {failure.error.retryable && (
+              <button onClick={() => pick(failure.spot)} disabled={!!saving}
+                className="w-full rounded-xl border border-line py-3 font-semibold disabled:opacity-60">
+                Try saving again
+              </button>
+            )}
+            <button onClick={() => onConfirm(failure.spot, false)} disabled={!!saving}
+              className="w-full rounded-xl bg-scarlet py-3 font-semibold text-white disabled:opacity-60">
+              Continue from {spotName(failure.spot)}
+            </button>
+          </div>
+        )}
         {!picking ? (
           <>
             <p className="text-center font-display text-lg font-bold">Right spot?</p>
@@ -81,7 +110,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
               <button onClick={() => pick(loc.spot)} className="rounded-2xl bg-scarlet py-4 font-semibold text-white">Yes, route me</button>
             </div>
           </>
-        ) : (
+        ) : !failure && (
           <p className="text-center text-sm text-muted">Your pick teaches the app this spot for next time.</p>
         )}
         <button onClick={onRetake} className="w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
