@@ -1,16 +1,5 @@
 # Hound Around: team plan (Sat Oct 24 – Sun Oct 25)
 
-Read this first, then your role file. Paste both into your AI tool (Claude Code, Kiro, Lovable) as context,
-together with `CLAUDE.md` and `docs/contract.md`.
-
-| Role | File | Owner |
-| --- | --- | --- |
-| Data lead | [data.md](data.md) | _name_ |
-| ML lead | [ml.md](ml.md) | _name_ |
-| Backend lead | [backend.md](backend.md) | David |
-| Front-end lead | [frontend.md](frontend.md) | _name_ |
-| Product and pitch lead | [pitch.md](pitch.md) | _name_ |
-
 ## The project in one breath
 
 Snap a photo in the CDS building (665 Comm Ave). Hound Around recognizes the hallway spot and floor, then routes you
