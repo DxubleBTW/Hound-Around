@@ -19,14 +19,15 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
 
   async function pick(spot) {
     if (pending.current) return
-    if (spot === loc.spot) return onConfirm(spot, false)
+    if (spot === loc.spot) return onConfirm(spot, null)
     const controller = new AbortController()
     pending.current = controller
     setFailure(null)
     setSaving(spot)
     try {
-      await correct(loc.photo_id, spot, { signal: controller.signal })
-      if (!controller.signal.aborted) onConfirm(spot, true)
+      const res = await correct(loc.photo_id, spot, { signal: controller.signal })
+      // Surface the new index size so the toast can read "N frames indexed".
+      if (!controller.signal.aborted) onConfirm(spot, res?.index_size ?? true)
     } catch (error) {
       if (!controller.signal.aborted) setFailure({ spot, error })
     } finally {
@@ -62,8 +63,12 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
               <span key={i} className={`h-2 flex-1 rounded-full ${i < votes ? 'bg-scarlet' : 'bg-line'}`} />
             ))}
           </div>
-          {loc.ocr_room && <p className="mt-3 text-sm text-muted">Also read a sign: Room {loc.ocr_room}</p>}
+          {loc.ocr_room && <p className="mt-3 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>}
         </div>
+      )}
+
+      {picking && loc.ocr_room && (
+        <p className="mt-4 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>
       )}
 
       {picking && (
@@ -92,12 +97,12 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
             </div>
             {failure.error.retryable && (
               <button onClick={() => pick(failure.spot)} disabled={!!saving}
-                className="w-full rounded-xl border border-line py-3 font-semibold disabled:opacity-60">
+                className="min-h-[44px] w-full rounded-xl border border-line py-3 font-semibold disabled:opacity-60">
                 Try saving again
               </button>
             )}
-            <button onClick={() => onConfirm(failure.spot, false)} disabled={!!saving}
-              className="w-full rounded-xl bg-scarlet py-3 font-semibold text-white disabled:opacity-60">
+            <button onClick={() => onConfirm(failure.spot, null)} disabled={!!saving}
+              className="min-h-[44px] w-full rounded-xl bg-scarlet py-3 font-semibold text-white disabled:opacity-60">
               Continue from {spotName(failure.spot)}
             </button>
           </div>
@@ -106,14 +111,14 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
           <>
             <p className="text-center font-display text-lg font-bold">Right spot?</p>
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setPicking(true)} className="rounded-2xl border border-line bg-white py-4 font-semibold">Not quite</button>
-              <button onClick={() => pick(loc.spot)} className="rounded-2xl bg-scarlet py-4 font-semibold text-white">Yes, route me</button>
+              <button onClick={() => setPicking(true)} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold">Not quite</button>
+              <button onClick={() => pick(loc.spot)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white">Yes, route me</button>
             </div>
           </>
         ) : !failure && (
           <p className="text-center text-sm text-muted">Your pick teaches the app this spot for next time.</p>
         )}
-        <button onClick={onRetake} className="w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
+        <button onClick={onRetake} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
       </div>
     </main>
   )

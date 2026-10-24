@@ -6,6 +6,8 @@ import { delay, requestJson } from './lib/request.js'
 const BASE = (import.meta.env?.VITE_API_URL || '').replace(/\/$/, '')
 export const MOCK = !BASE
 
+// locate accepts an optional AbortSignal so Locating can cancel the in-flight
+// request (on retake/unmount) and enforce its own ~8s timeout.
 export async function locate(blob, { signal } = {}) {
   if (MOCK) return mockLocate(signal)
   const fd = new FormData()
@@ -48,17 +50,20 @@ function mockLocate(signal) {
 }
 
 function mockRoute({ from, to, accessible }, signal) {
+  // Vertical wording mirrors the two real forms api/routing.py emits (design §5),
+  // so mock demos exercise the same Route icons/floor-change card the backend drives.
+  // This is mock-only text, not a contract change.
   const steps = from.startsWith('F2')
     ? [
         { instruction: 'Turn around and walk toward the podium elevators', meters: 22, node: 'F2_podium_elev' },
         accessible
-          ? { instruction: 'Take a podium elevator down to 1', meters: 0, node: 'F1_podium_elev' }
-          : { instruction: 'Take the stairs down one floor', meters: 8, node: 'F1_stair_east' },
-        { instruction: `Head straight past the lobby to ${to}`, meters: 18, node: 'F1_room164' },
+          ? { instruction: 'Take the elevator to 1, toward Lobby (podium elevators)', meters: 0, node: 'F1_podium_elev' }
+          : { instruction: 'Take the stairs to 1, toward east stair', meters: 8, node: 'F1_stair_east' },
+        { instruction: `Continue toward ${to}`, meters: 18, node: 'F1_room164' },
       ]
     : [
-        { instruction: 'Walk past the tower elevators', meters: 12, node: 'F1_core_elev' },
-        { instruction: `Turn left; ${to} is on your right`, meters: 15, node: 'F1_room164' },
+        { instruction: 'Walk toward the tower elevators', meters: 12, node: 'F1_core_elev' },
+        { instruction: `Turn left and walk toward ${to}`, meters: 15, node: 'F1_room164' },
       ]
   const total = steps.reduce((a, s) => a + s.meters, 0)
   return delay(400, { steps, total_meters: total, est_seconds: Math.round(total / 1.2) }, signal)

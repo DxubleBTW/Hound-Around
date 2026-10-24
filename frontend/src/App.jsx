@@ -5,10 +5,17 @@ import Confirm from './screens/Confirm.jsx'
 import Route from './screens/Route.jsx'
 import { MOCK } from './api.js'
 
+// Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
+function initialDest() {
+  if (typeof window === 'undefined') return '164'
+  const to = new URLSearchParams(window.location.search).get('to')
+  return to && to.trim() ? to.trim() : '164'
+}
+
 // Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
 export default function App() {
   const [screen, setScreen] = useState('snap')
-  const [dest, setDest] = useState('164')
+  const [dest, setDest] = useState(initialDest)
   const [accessible, setAccessible] = useState(false)
   const [photo, setPhoto] = useState(null) // { blob, url }
   const [loc, setLoc] = useState(null) // /locate response
@@ -49,7 +56,10 @@ export default function App() {
           photo={photo} loc={loc}
           onConfirm={(spot, learned) => {
             setHere(spot)
-            if (learned) flash('Got it. Hound Around just learned from you.')
+            if (learned) {
+              const size = Number.isFinite(learned) ? learned : null
+              flash(size ? `Thanks, it learned that. ${size} frames indexed.` : 'Thanks, it learned that.')
+            }
             setScreen('route')
           }}
           onRetake={restart}
