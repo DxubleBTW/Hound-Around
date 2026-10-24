@@ -1,6 +1,9 @@
 **
 !requirements.txt
+!requirements-ml.txt
 !api/
 !api/*.py
 !ml/
 !ml/*.py
+!deploy/
+!deploy/*.py

@@ -84,21 +84,28 @@ Set `VITE_API_URL` to the backend URL (for example the HF Space URL) for a real 
 
 ### Docker / Hugging Face Space
 
-The root `Dockerfile` builds the backend on `python:3.11-slim`, port 7860, as the non-root user `app`, with `HOUND_DATA_DIR=/app/data`. `.dockerignore` lets only `requirements.txt`, `api/`, and `ml/` enter the build context; no data, images, or weights are ever in the context.
+The root `Dockerfile` builds the backend on `python:3.11-slim`, port 7860, as the non-root user `app`, with `HOUND_DATA_DIR=/app/data`. `.dockerignore` lets only `requirements.txt`, `requirements-ml.txt`, `api/`, `ml/` and `deploy/` enter the build context; no data, images, or weights are ever in the context.
 
 Deployment is a **public** HF Space (the code is already public) that at startup downloads `graph.json`, `rooms.json`, and `index.npz` from a **private** HF dataset repo using an `HF_TOKEN` Space secret (`huggingface_hub`). Private files never enter the public Space repo. The ML model weights (`facebook/dinov2-small` + EasyOCR) are downloaded at **build time** so cold start does not pull them.
 
-The following Dockerfile and Space changes are gated on approval of the ML dependencies and network access, and are documented but **not applied** here (see design §6):
+The Dockerfile now builds the full ML image. It installs `requirements-ml.txt` (CPU-only `torch`, `transformers`,
+`easyocr`, `huggingface_hub`; **needs team approval**), bakes the `facebook/dinov2-small` and EasyOCR weights in at
+build time, copies `ml/`, and sets `HOUND_ML_FACTORY=ml.backend:create_backend` and the production CORS origins.
+On start, `deploy/fetch_data.py` downloads `graph.json`, `rooms.json`, `index.npz` (and `labels.csv` if present)
+from the private dataset repo, then uvicorn starts with one worker.
 
-- Install CPU-only `torch`, `transformers`, `easyocr`, and `huggingface_hub`.
-- Download `facebook/dinov2-small` and the EasyOCR model weights at build time (no download at cold start).
-- `COPY` the `ml/` package into the image.
-- Set these environment variables on the Space:
-  - `HOUND_ML_FACTORY=ml.backend:create_backend`
-  - `HOUND_DATA_DIR=/app/data` (already set in the Dockerfile)
-  - `HOUND_CORS_ORIGINS=https://www.hound-around.tech,https://hound-around.tech,https://hound-around-theta.vercel.app,http://localhost:5173`
-  - `HF_TOKEN` (secret) plus the private dataset repo id
-- Run a single Uvicorn worker (corrections live in one in-memory index).
+Space setup (Settings → Variables and secrets):
+  - `HOUND_DATA_REPO` (variable): the **private** dataset repo id, e.g. `your-team/hound-around-data`
+  - `HF_TOKEN` (secret): a read token that can see that dataset
+
+Local check before pushing to the Space:
+```sh
+docker build -t hound .
+docker run --rm -p 7860:7860 -v "$PWD/data:/app/data" hound   # uses your local private data/
+curl -i http://127.0.0.1:7860/health                            # 200 with "model": "facebook/dinov2-small"
+```
+If a file is missing, the server still starts and `/health` returns 503 (the app shows its "server waking up" notice)
+instead of crash-looping.
 
 **Rate limit behind the HF proxy.** The backend caps POSTs at 30/min per peer IP. Behind the HF proxy every request arrives from the proxy IP, so all judges would share one bucket. The fix (design §7) is to run Uvicorn with `--proxy-headers` and a trusted-hosts allowlist so the real client IP is resolved for the HF proxy only (never trusting arbitrary forwarded headers), and to raise the limit for the demo window as a safety net. This must be tested against the deployed Space.
 

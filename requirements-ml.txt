@@ -1,0 +1,9 @@
+# ML runtime for the Hugging Face Space. NEEDS TEAM APPROVAL before merging (CLAUDE.md: no new deps without asking).
+# Kept separate from requirements.txt so the backend's approved list is unchanged.
+# The Dockerfile installs CPU-only torch/torchvision first from the PyTorch CPU index (the PyPI Linux wheels
+# are CUDA builds, ~2 GB larger); these ranges then see them as already satisfied.
+torch>=2.6,<2.7            # DINOv2 inference (matches the team laptops' torch 2.6)
+torchvision>=0.21,<0.22    # required by easyocr; pinned to match torch 2.6
+transformers>=4.47,<5      # facebook/dinov2-small via AutoModel / AutoImageProcessor
+easyocr>=1.7,<2            # room-sign / floor-numeral OCR backup
+huggingface_hub>=0.26,<1   # startup download of private graph/rooms/index (deploy/fetch_data.py)
