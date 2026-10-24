@@ -19,7 +19,7 @@ export const DEST_GROUPS = [
   {
     title: 'Popular',
     items: [
-      { value: '164', label: 'Room 164 · Closing Ceremony' },
+      { value: '164', label: 'Room 164' },
       { value: 'B62', label: 'Room B62' },
       { value: '262', label: 'Room 262' },
       { value: '263', label: 'Room 263' },
