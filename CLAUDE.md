@@ -3,6 +3,8 @@
 Goal: phone photo → recognize hallway spot + floor → route to a room → user corrects if wrong.
 Stack: FastAPI (Python 3.11) on Hugging Face Spaces · React+Vite+Tailwind on Vercel · DINOv2-small + numpy cosine, top-10 voting · EasyOCR for room numbers / floor numerals · networkx routing · SQLite corrections.
 
+Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it before starting work.
+
 ## Hard rules
 - The API contract in docs/contract.md is law. Never rename fields or add endpoints without asking.
 - Node IDs look like F2_hall_e2 / B1_core_elev and come from data/graph.json. Never invent nodes.

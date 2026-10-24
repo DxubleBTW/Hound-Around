@@ -1,0 +1,102 @@
+# Hound Around: where things stand
+
+Last updated Sat Oct 24, 2026, 1:45 PM, by David. Read this first, then `CLAUDE.md`, `docs/contract.md` and your file in
+`docs/roles/`. Coding agents: treat this as the current state of the project. Update it when something here changes.
+
+## Live links
+
+| What | Where | State |
+| --- | --- | --- |
+| Front end | https://hound-around-theta.vercel.app | Up, but on **mock data** until `VITE_API_URL` is set in Vercel (Avery; see `docs/handoff-vercel-backend.md`) |
+| Backend API | https://dribeiro0-hound-around.hf.space | **Live and healthy**: `/health` → `ok: true`, 2,375 vectors, 53 spots |
+| Backend Space | huggingface.co/spaces/dribeiro0/hound-around | Public Docker Space (David's account), deployed from `main` at `c55ebfa` |
+| Private data | HF dataset `dribeiro0/hound-around-data` | `index.npz`, `graph.json`, `rooms.json`. Private; the Space reads it with a read-only `HF_TOKEN` secret |
+
+Live checks at 1:30 PM: two held-out hallway photos came back as the right spot in 0.7–0.9 s; an accessible route from
+the west entrance to Room 164 came back as 3 steps, 65 m; CORS allows the production Vercel origin.
+
+## What works
+
+- **Core loop end to end through the real API:** photo → spot + floor → route (accessible mode uses elevators) →
+  correction goes live in the index.
+- **Data:** about 2,400 face-blurred, labeled frames from three filming sessions Saturday morning: B1 (3 walks), F1
+  (17 one-spot clips + 1 walk), F2 (5 walks). Never in this repo.
+- **Graph:** 61 spots on B1/F1/F2, all connected. Room aliases: 164 (opening/closing ceremony), B62, B64A, 220
+  (CS Builds), 262–265 (hacking rooms), Spark (incubator lab, F2 west).
+- **Tests:** `python -m pytest -q` → 66 passed (API, ML, eval, property tests, plus regressions for every finding in
+  the Kiro code review).
+
+## Accuracy so far (real footage, not outsider photos yet)
+
+Leave-one-video-out: train on every other video, test on 1,077 frames taken right at a spot. This is the honest
+in-building number; the outsider test set will be the headline number.
+
+| Floor | Exact spot | Within 10 m | Right floor | User success* |
+| --- | --- | --- | --- | --- |
+| B1 | 32% | 49% | 74% | 55% |
+| F1 | 23% | 50% | 73% | 50% (only 48 test frames: F1 needs a second filming session) |
+| F2 | 23% | 52% | 78% | 59% |
+| All | 28% | 50% | 75% | 56% |
+
+\* User success = a confident answer within 10 m, or the top-3 picker contains the true spot.
+
+- A correction makes the next photo of that spot right **80%** of the time (the "it learned from you" demo moment).
+- The top-3 picker shows for 62% of photos.
+
+**What the experiments showed (for the pitch, `ml/research/`):**
+- DINOv2 beats a color-histogram baseline and CLIP; nearest-frame voting is the best simple method.
+- PIGEON-style distance-smoothed labels help within a session (top-3 0.61 → 0.75) but not across sessions.
+- **More frames from the same videos stop helping** past about 40 per spot. New sessions and new angles help: B1 went
+  from 28% to 53% top-3 going from 1 to 2 training videos.
+- The main errors are look-alike neighbors (the F2 east corridor E1–E4) and **B1 ↔ F2 confusion** from lighting and
+  session effects. Room-sign OCR and the top-3 picker are the safety net.
+
+## Changed behavior the team should know
+
+- **Confidence** is now the winner's votes plus votes for spots within 8 m on the same floor, / 10 (it was winner's
+  votes / 10). Look-alike neighbors split the vote but the route starts in the same place. `top3` vote counts are
+  unchanged. This cut picker prompts from 82% to 62% with no accuracy loss. `docs/contract.md` should say so; agree it
+  as a team.
+- **A correction wins** when it's the nearest match to the new photo (it used to get pushed out by duplicate frames).
+- **No index → the API reports 503** ("not ready") instead of answering with a made-up location.
+- **The OCR floor override** now re-ranks within that floor, so the app's answer is always the first picker option.
+
+## Open work, by owner
+
+| Priority | Task | Owner |
+| --- | --- | --- |
+| 1 | **Outsider test photos:** 30–50 photos from people not on the team, named `TEST_<spot>_NN.jpg`, to David's Drive. Needed for the go/no-go and the headline accuracy number | Anyone |
+| 2 | Set `VITE_API_URL=https://dribeiro0-hound-around.hf.space` in Vercel and redeploy (`docs/handoff-vercel-backend.md`) | Avery |
+| 3 | **Film F1 again**, a second session: 360° clips at every F1 spot, plus `class24`, `class48`, `south_stair`, `cafe_entry`, `restrooms_w`, `stair_east`. F1 is the demo floor | Data (David) |
+| 4 | F2 360° clips for one-video spots (`hall_w`, `hall_ne`, `hall_north`, `core_elev`, `core_e`, `csbuilds`, `open_study`, `class20`, `class48c`) and the missing `class48a`; close-ups of room-number signs | Data |
+| 5 | Confirm which doors are 262, 263, 264, 265 and B62 (current mapping is inferred from walk order) | Anyone on site |
+| 6 | Restore the "Try again" button on the route screen (lost in the Kiro front-end merge) | Front end |
+| 7 | Phone test on event Wi-Fi and cellular | Front end |
+| 8 | Interviews (~10), stranger timing test, slides, demo script, backup video. **Devpost project tonight; submit by Sun 10 AM** | Pitch |
+| 9 | Ethics Genius Bar visit (basement yellow space); ethics slide | David + Pitch |
+
+## How to update the backend
+
+- **New footage:** David processes it (extract → label → blur), rebuilds `index.npz`, re-uploads it to the private
+  dataset, then restarts the Space. Nothing data-related goes to GitHub.
+- **New backend code on `main`:** the Space is a copy, not linked to GitHub, so David redeploys it. Export with
+  `git -c core.autocrlf=false archive` (Windows line endings break `scripts/start.sh` on Linux).
+- **Corrections reset** whenever the Space restarts. That's fine for the demo.
+
+## Commands
+
+```bash
+python -m pytest -q                                   # all tests
+python -m ml.build_index                              # rebuild data/index.npz from data/*/labels.csv
+python pipeline/api_graph.py                          # data/graph.json + rooms.json from the walk sheets + private patch
+python -m ml.eval --split test --limit 10             # go/no-go on outsider photos in data/test/
+python -m ml.research.backend_eval --dataset data/dataset data/dataset_new data/dataset_f2   # per-floor real-data numbers
+curl https://dribeiro0-hound-around.hf.space/health
+```
+
+## Rules (unchanged)
+
+- The repo is public: never commit frames, video, floor plans, `graph.json`, `rooms.json`, `index.npz`, tokens or
+  anything under `data/`.
+- Faces are blurred before frames leave the laptop. User photos are deleted right after matching. No GPS, no tracking.
+- Unsure about an event rule? Ask hackbu@bu.edu or Discord. Don't guess.
