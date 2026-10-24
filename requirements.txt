@@ -6,3 +6,10 @@ python-multipart>=0.0.18,<1
 pillow>=11,<14
 numpy>=2,<3
 networkx>=3,<4
+# Runtime recognition deps (ship to the HF Space). Imported lazily by ml/* so
+# the test suite stays green without them installed. The Dockerfile installs the
+# CPU-only torch build via --index-url https://download.pytorch.org/whl/cpu.
+torch>=2.2,<3          # DINOv2 inference in ml/embedder.py (CPU wheels on the Space)
+transformers>=4.44,<5  # loads facebook/dinov2-small in ml/embedder.py
+easyocr>=1.7,<2        # room/floor OCR in ml/ocr.py
+huggingface_hub>=0.24,<1  # downloads private graph/rooms/index at Space startup

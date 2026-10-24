@@ -4,3 +4,5 @@
 !api/*.py
 !ml/
 !ml/*.py
+!scripts/
+!scripts/*
