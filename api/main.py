@@ -1,0 +1,321 @@
+"""Run with uvicorn api.main:app. Data is supplied outside Git."""
+from collections import OrderedDict
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from io import BytesIO
+import json
+import logging
+import os
+from pathlib import Path
+import sqlite3
+from threading import RLock
+import time
+import uuid
+import warnings
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from PIL import Image, ImageOps, UnidentifiedImageError
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field
+from python_multipart.exceptions import MultipartParseError
+from starlette.concurrency import run_in_threadpool
+from starlette.formparsers import MultiPartException, MultiPartParser
+
+from api.recognition import StubBackend, load_backend
+from api.routing import Router
+
+MAX_UPLOAD = 2 * 1024 * 1024
+MAX_BODY = MAX_UPLOAD + 64 * 1024  # Multipart headers/boundary allowance.
+logger = logging.getLogger(__name__)
+
+
+class MemoryMultipartParser(MultiPartParser):
+    spool_max_size = MAX_BODY
+
+
+class UploadLimit:
+    """Bound incoming bodies before Starlette can spool uploads to disk."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope['method'] != 'POST':
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message['type'] == 'http.disconnect':
+                return
+            body.extend(message.get('body', b''))
+            if len(body) > MAX_BODY:
+                await JSONResponse({'detail': 'Request too large'}, status_code=413)(scope, receive, send)
+                return
+            if not message.get('more_body', False):
+                break
+        delivered = False
+
+        async def replay():
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+
+class Correction(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    photo_id: str
+    true_spot: str
+
+
+class Vote(BaseModel):
+    spot: str
+    votes: int = Field(ge=0)
+
+
+class MatchResult(BaseModel):
+    spot: str
+    floor: Literal[-1, 1, 2]
+    heading: str | None
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
+    top3: list[Vote] = Field(min_length=1, max_length=3)
+    ocr_room: str | None
+    ocr_floor: Literal[-1, 1, 2] | None
+
+
+def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
+               cache_limit=512, ttl_seconds=600, allowed_origins=None):
+    data_dir = Path(data_dir or os.getenv('HOUND_DATA_DIR', 'data'))
+    if cache_limit < 1 or ttl_seconds <= 0:
+        raise ValueError('Cache size and TTL must be positive')
+    lock = RLock()
+    rate_lock = RLock()
+    cache = OrderedDict()
+    requests = OrderedDict()
+    state = {'matcher': matcher, 'router': router, 'db': None, 'version': 0, 'rollback': None}
+
+    def prune():
+        now = clock()
+        for key in list(cache):
+            if cache[key]['expires'] <= now:
+                del cache[key]
+
+    @asynccontextmanager
+    async def lifespan(app):
+        if state['router'] is None and (data_dir / 'graph.json').exists():
+            graph = json.loads((data_dir / 'graph.json').read_text())
+            rooms = json.loads((data_dir / 'rooms.json').read_text())
+            state['router'] = Router(graph, rooms)
+        if state['matcher'] is None and state['router'] is not None:
+            factory = os.getenv('HOUND_ML_FACTORY')
+            stub_spot = os.getenv('HOUND_STUB_SPOT')
+            if factory and stub_spot:
+                raise ValueError('Choose a real ML factory or an explicit stub, not both')
+            if factory:
+                state['matcher'] = load_backend(factory, data_dir)
+            elif stub_spot:
+                state['matcher'] = StubBackend(state['router'].nodes[stub_spot])
+        data_dir.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(data_dir / 'corrections.sqlite', check_same_thread=False)
+        db.execute('CREATE TABLE IF NOT EXISTS corrections ('
+                   'photo_id TEXT PRIMARY KEY, true_spot TEXT, predicted TEXT, '
+                   'confidence REAL, created_at TEXT)')
+        db.commit()
+        state['db'] = db
+        try:
+            yield
+        finally:
+            cache.clear()
+            requests.clear()
+            db.close()
+            state['db'] = None
+
+    app = FastAPI(lifespan=lifespan)
+    app.add_middleware(UploadLimit)
+    origins = allowed_origins if allowed_origins is not None else [
+        x.strip() for x in os.getenv('HOUND_CORS_ORIGINS', 'http://localhost:5173').split(',') if x.strip()]
+    if '*' in origins:
+        raise ValueError('CORS requires explicit origins')
+    app.add_middleware(CORSMiddleware, allow_origins=origins,
+                       allow_methods=['GET', 'POST'], allow_headers=['Content-Type'])
+
+    @app.middleware('http')
+    async def rate_limit(request: Request, call_next):
+        if request.method == 'POST':
+            # Use the direct peer; do not trust user-supplied forwarded IPs.
+            peer = request.client.host if request.client else 'unknown'
+            now = clock()
+            with rate_lock:
+                for key in list(requests):
+                    if now - requests[key][0] >= 60:
+                        del requests[key]
+                started, count = requests.get(peer, (now, 0))
+                if count >= 30:
+                    return JSONResponse({'detail': 'Too many requests'}, status_code=429,
+                                        headers={'Retry-After': '60'})
+                if len(requests) >= 4096 and peer not in requests:
+                    return JSONResponse({'detail': 'Server busy'}, status_code=429)
+                requests[peer] = (started, count + 1)
+        return await call_next(request)
+
+    @app.exception_handler(Exception)
+    async def unexpected(request, exc):
+        logger.error('Backend request failed: %s', type(exc).__name__)
+        return JSONResponse({'detail': 'Internal server error'}, status_code=500)
+
+    @app.get('/health')
+    def health():
+        with lock:
+            prune()
+            model = state['matcher']
+            ready = model is not None and state['router'] is not None
+            return JSONResponse({'ok': ready, 'index_size': model.size if model else 0,
+                                 'model': model.model_name if model else 'unconfigured'},
+                                status_code=200 if ready else 503)
+
+    def locate(raw):
+        started = time.perf_counter()
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('error', Image.DecompressionBombWarning)
+                with Image.open(BytesIO(raw)) as original:
+                    if original.format not in ('JPEG', 'PNG', 'WEBP'):
+                        raise ValueError('Unsupported image format')
+                    if original.width * original.height > 20_000_000:
+                        raise ValueError('Image dimensions too large')
+                    original.load()
+                    image = ImageOps.exif_transpose(original).convert('RGB')
+                    image.info.clear()
+        except (UnidentifiedImageError, OSError, ValueError,
+                Image.DecompressionBombWarning, Image.DecompressionBombError):
+            raise HTTPException(422, 'Invalid or unsupported image') from None
+        try:
+            image.thumbnail((512, 512))
+            with lock:
+                model = state['matcher']
+                if model is None or state['router'] is None:
+                    raise HTTPException(503, 'Recognition data not ready')
+                result = dict(model.locate(image))
+                vector = np.asarray(result.pop('vector'), dtype=np.float32)
+                norm = np.linalg.norm(vector.astype(np.float64))
+                if vector.shape != (384,) or not np.isfinite(vector).all() or not np.isfinite(norm) or norm == 0:
+                    raise ValueError('Invalid ML vector')
+                vector = (vector / norm).astype(np.float32)
+                # Enforce the public contract even if the ML result has diagnostics.
+                fields = ('spot', 'floor', 'heading', 'confidence', 'top3', 'ocr_room', 'ocr_floor')
+                result = MatchResult(**{field: result[field] for field in fields}).model_dump()
+                if result['spot'] not in state['router'].nodes:
+                    raise ValueError('ML returned unknown node')
+                nodes = state['router'].nodes
+                if (nodes[result['spot']]['floor'] != result['floor']
+                        or any(vote['spot'] not in nodes for vote in result['top3'])
+                        or (result['heading'] is not None and not state['router'].graph.has_edge(
+                            result['spot'], result['heading']))):
+                    raise ValueError('ML result disagrees with graph')
+                prune()
+                while len(cache) >= cache_limit:
+                    cache.popitem(last=False)
+                photo_id = 'p_' + uuid.uuid4().hex
+                cache[photo_id] = {'vector': vector.copy(), 'predicted': result['spot'],
+                                   'confidence': result['confidence'], 'expires': clock() + ttl_seconds}
+                return {**result, 'photo_id': photo_id,
+                        'ms': round((time.perf_counter() - started) * 1000)}
+        finally:
+            image.close()
+
+    @app.post('/locate', openapi_extra={'requestBody': {'required': True, 'content': {
+        'multipart/form-data': {'schema': {'type': 'object', 'required': ['image'],
+                                           'properties': {'image': {'type': 'string', 'format': 'binary'}}}}}}})
+    async def locate_endpoint(request: Request):
+        if not request.headers.get('content-type', '').lower().startswith('multipart/form-data'):
+            raise HTTPException(415, 'Multipart image required')
+        try:
+            form = await MemoryMultipartParser(request.headers, request.stream(), max_files=1,
+                                               max_fields=0, max_part_size=MAX_BODY).parse()
+        except (MultiPartException, MultipartParseError):
+            raise HTTPException(422, 'Invalid multipart upload') from None
+        try:
+            upload = form.get('image')
+            if upload is None or not hasattr(upload, 'read'):
+                raise HTTPException(422, 'Multipart image field required')
+            raw = await upload.read(MAX_UPLOAD + 1)
+            if len(raw) > MAX_UPLOAD:
+                raise HTTPException(413, 'Image exceeds 2 MB')
+            return await run_in_threadpool(locate, raw)
+        finally:
+            await form.close()
+
+    @app.get('/route')
+    def route_endpoint(start: str = Query(alias='from'), to: str = Query(),
+                       accessible: bool = False, heading: str | None = None):
+        route_service = state['router']
+        if route_service is None:
+            raise HTTPException(503, 'Routing data not ready')
+        try:
+            return route_service.route(start, to, accessible, heading)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.post('/correct')
+    def correct(body: Correction):
+        with lock:
+            prune()
+            model, routes, db = state['matcher'], state['router'], state['db']
+            if model is None or routes is None or db is None:
+                raise HTTPException(503, 'Recognition data not ready')
+            if body.true_spot not in routes.nodes:
+                raise HTTPException(422, 'Unknown node')
+            entry = cache.get(body.photo_id)
+            if entry is None:
+                raise HTTPException(410, 'Photo expired, corrected, or unknown; take another photo')
+            prepared = model.prepare_correction(entry['vector'], body.true_spot)
+            snapshot = model.snapshot()
+            try:
+                with db:
+                    db.execute('INSERT INTO corrections VALUES (?, ?, ?, ?, ?)',
+                               (body.photo_id, body.true_spot, entry['predicted'], entry['confidence'],
+                                datetime.now(timezone.utc).isoformat()))
+                    model.apply_correction(prepared)
+            except Exception:
+                model.restore(snapshot)
+                raise
+            state['rollback'] = (body.photo_id, snapshot)
+            state['version'] += 1
+            del cache[body.photo_id]
+            return {'ok': True, 'index_size': model.size}
+
+    def rollback_last_correction():
+        """Local operator hook, deliberately not a new public API endpoint."""
+        with lock:
+            if state['rollback'] is None:
+                raise ValueError('No correction to roll back')
+            photo_id, snapshot = state['rollback']
+            model, db = state['matcher'], state['db']
+            current = model.snapshot()
+            try:
+                with db:
+                    db.execute('DELETE FROM corrections WHERE photo_id = ?', (photo_id,))
+                    model.restore(snapshot)
+            except Exception:
+                model.restore(current)
+                raise
+            # Invalidate vectors computed against the replaced index version.
+            cache.clear()
+            state['rollback'] = None
+            state['version'] += 1
+            return state['version']
+
+    app.state.rollback_last_correction = rollback_last_correction
+    app.state.index_version = lambda: state['version']
+    return app
+
+
+app = create_app()
