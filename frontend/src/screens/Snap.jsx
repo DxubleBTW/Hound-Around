@@ -9,15 +9,19 @@ const QUICK = [
 export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto }) {
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    setError('')
     setBusy(true)
     try {
       const blob = await shrinkImage(file)
       onPhoto({ blob, url: URL.createObjectURL(blob) })
+    } catch {
+      setError('We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
     } finally {
       setBusy(false)
     }
@@ -66,6 +70,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
       </section>
 
       <div className="mt-auto pt-8">
+        {error && <p role="alert" className="mb-3 text-sm text-scarlet">{error}</p>}
         <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
         <button onClick={() => input.current?.click()} disabled={busy || !dest.trim()}
           className="flex w-full items-center justify-center gap-3 rounded-3xl bg-scarlet py-5 font-display text-xl font-bold text-white shadow-[0_10px_30px_-10px_rgba(204,0,0,.6)] active:scale-[.98] disabled:opacity-50">
