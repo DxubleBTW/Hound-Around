@@ -78,11 +78,15 @@ These were in the repo before Kiro and are **not** Kiro's work:
   need approval of `torch`/`easyocr`/`huggingface_hub` plus network and
   accounts) and are surfaced as asks, not performed.
 
-### Still pending
+### Done in this wave (dependencies + deployment + property tests)
 
-- **Property-based tests** (the one-correction-flip) are **pending approval of
-  the `hypothesis` dependency**. They have NOT run yet and have not caught
-  anything; nothing here claims otherwise.
+- The four runtime deps, `hypothesis`, and the experiments-only
+  `requirements-experiments.txt` were added after the user approved all proposed
+  dependencies; `tests/test_properties.py` was added and run; and the Dockerfile
+  now installs CPU torch, pre-downloads DINOv2/EasyOCR at build time, and pulls
+  private data at startup via `scripts/fetch_data.py` + `scripts/start.sh`. See
+  the Running log for the full, honest detail (including that `docker build` was
+  environment-blocked and that the property tests caught no production bug).
 
 ## Hooks (what each automates)
 
@@ -138,9 +142,13 @@ to start but would not have kept those non-negotiables visible on every change.
   handoff interface) and `ml.md` mattered most while building the `ml/` package;
   `frontend.md` guided the frontend finishing; `structure.md`/`tech.md` fixed
   the layout and proof commands.
-- **What the property tests caught:** nothing yet. The property-based tests
-  (the one-correction-flip) are **pending approval of the `hypothesis`
-  dependency** and have not run. No claim is made that they caught anything.
+- **What the property tests caught:** no production bug. After `hypothesis` was
+  approved and installed, `tests/test_properties.py` ran and surfaced only three
+  of the test's own initial assumption errors (confidence denominator is the
+  configured `top_k`; the Router groups straight segments so per-edge invariants
+  belong on the reconstructed shortest path; parallel input edges collapse to
+  the last-added one in the `DiGraph`). All three were fixed in the test with no
+  change to `api/` or `ml/`. Detail in the Running log.
 - **MCP / Kiro powers used:** none. No MCP servers and no Kiro powers were used
   for this work; it was done with the file, search, shell, and git tooling only.
 - **What a person changed by hand** (vs what Kiro generated): the pre-existing
@@ -151,6 +159,86 @@ to start but would not have kept those non-negotiables visible on every change.
   deps and running `docker build`, creating the HF Space + private dataset repo
   + `HF_TOKEN` secret, setting `VITE_API_URL` in Vercel and redeploying, running
   the curl proofs against the deployed Space, and the end-to-end phone demo.
+
+- **Dependencies approved + deployment plumbing + property tests (2026-10-24,
+  user said "Approve all of them"):** the user approved every proposed
+  dependency, so the four runtime packages were appended to `requirements.txt`
+  with comments noting where each is used — `torch>=2.2,<3` (DINOv2 inference,
+  CPU wheels on the Space), `transformers>=4.44,<5` (loads `facebook/dinov2-small`),
+  `easyocr>=1.7,<2` (room/floor OCR), `huggingface_hub>=0.24,<1` (startup
+  private-data pull). `hypothesis>=6,<7` was appended to `requirements-dev.txt`.
+  CLIP + matplotlib stay **experiments-only** in a new, never-shipped
+  `requirements-experiments.txt` (not referenced by `requirements.txt`, not
+  installed in the Dockerfile); it pins `matplotlib>=3.7,<4` and uses
+  `open_clip_torch>=2.20` for the CLIP ViT-B/32 baseline instead of the unpinned
+  `git+https://github.com/openai/CLIP.git` (a versioned, pip-installable package
+  carrying the same ViT-B/32 weights, with no VCS dependency — noted in a
+  comment there). The runtime deps are still **lazily imported** by `ml/*`, so
+  the test suite stays green without torch/easyocr installed.
+  - **Property-based tests** (`tests/test_properties.py`, workstream F) now
+    exist and run. They use ONLY synthetic graphs and synthetic normalized
+    vectors (no torch, no photos), reusing the `basis()` / injected-embedder
+    conventions from `tests/test_ml.py`. Routing properties: accessible routes
+    never traverse a `stairs:true` edge; the path leaves `from` on a live edge
+    and ends at the resolved `to`; `from==to` yields empty steps and zero
+    totals; `total_meters` equals the sum of step meters; `est_seconds ==
+    ceil(total/speed)` (1.2, or 0.9 accessible); unknown room/node raises
+    `ValueError`; `verify:true` edges are dropped so no path hop is verify-only;
+    no step/path node is on a floor outside {-1,1,2}; room aliases resolve
+    case-/whitespace-insensitively; `LookupError` (no path) is treated as a
+    valid outcome. Voting properties: `0 <= confidence <= 1`; on the
+    non-override path `confidence == winning_votes / top_k`; `top3` is
+    votes-descending with unique spots, length ≤ 3, and vote sum ≤
+    examined*`CORRECTION_WEIGHT`; `spot == top3[0].spot`; the returned `floor`
+    matches the winning spot's node floor; `heading` is null or a graph
+    neighbor; snapshot/restore round-trips and does not alias the live index;
+    and the one-correction-flip (a single weight-`CORRECTION_WEIGHT` correction
+    outvotes up to `CORRECTION_WEIGHT-1` stale video exemplars for the next
+    near-identical query).
+  - **What the property tests caught:** no production bug. Hypothesis surfaced
+    three of my own initial test-assumption errors (now fixed in the test, with
+    no change to `api/` or `ml/`): (1) the confidence denominator is the
+    configured `top_k`, not `min(top_k, len(index))` — e.g. one `video` exemplar
+    with `top_k=2` gives `confidence=0.5`, not `1.0`; (2) the Router groups
+    consecutive straight "Continue" segments into one step, so a step's `node`
+    is the END of a grouped chain, not a direct neighbor — the per-edge
+    invariants belong on the reconstructed `nx.shortest_path`, which the grouped
+    steps summarize; (3) when the input graph has parallel edges between a pair,
+    the `DiGraph` keeps the last-added one, so the effective `stairs` flag must
+    be read off the live edge, not the input rows. All are genuine properties of
+    the existing, correct code; no `api/`/`ml/` code was touched to make them
+    pass.
+  - **Dockerfile + startup data-pull:** the Dockerfile now installs the CPU-only
+    torch wheel (`--index-url https://download.pytorch.org/whl/cpu`) before the
+    rest of `requirements.txt` (no CUDA wheels), copies `ml/` and `scripts/`
+    alongside `api/`, and pre-downloads `facebook/dinov2-small` (transformers)
+    and the EasyOCR English models at **build time** into `/app/caches` (owned
+    by the non-root `app` user; `HF_HOME`/`TRANSFORMERS_CACHE`/
+    `EASYOCR_MODULE_PATH` point there) so cold start does not fetch them. The
+    container CMD is now `bash scripts/start.sh`, which runs
+    `python scripts/fetch_data.py` then execs uvicorn with `--proxy-headers
+    --forwarded-allow-ips='*'` (the HF-proxy rate-limit fix, design §7; HF's
+    proxy IP is not stable so `'*'` with the per-peer limiter is the documented
+    demo choice). `scripts/fetch_data.py` downloads `graph.json`/`rooms.json`/
+    `index.npz` from the PRIVATE HF dataset repo via
+    `huggingface_hub.hf_hub_download(repo_type="dataset", token=HF_TOKEN)` into
+    `HOUND_DATA_DIR` only when `HOUND_DATA_REPO` and `HF_TOKEN` are both set,
+    and **no-ops gracefully** (logs and exits 0) otherwise, so a local
+    `docker run` without secrets still boots to the 503 "data not ready" state.
+    No token or private file is baked into the image; `data/`, `*.npz`,
+    `*.sqlite`, and images stay excluded from the build context (`.dockerignore`
+    only gained `!scripts/` + `!scripts/*`).
+  - **Was `docker build` actually run?** No — it was **environment-blocked**.
+    The sandbox's docker is podman and fails with "could not find a working
+    conmon binary", so no container can build or run here. The pieces that could
+    be proven were: `.venv/bin/python scripts/fetch_data.py` (with
+    `HOUND_DATA_REPO` unset, and with it set but `HF_TOKEN` unset) prints the
+    graceful skip and exits 0; `bash -n scripts/start.sh` passes; and
+    `python -c "import ml.backend, api.main"` imports cleanly. The actual
+    `docker build` (CPU torch install + model pre-download) remains human/CI
+    blocked.
+  - Proof: `.venv/bin/python -m pytest -q` → **55 passed** (the prior 49 plus
+    the 6 new property tests).
 
 - **Review-driven fix (2026-10-24, APPROVED review follow-up):** the semantic
   review flagged that the OCR floor-override multiplied `confidence` by `0.5`,

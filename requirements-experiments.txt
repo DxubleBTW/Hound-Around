@@ -1,0 +1,12 @@
+# Experiments-only dependencies. These are NOT referenced by requirements.txt
+# and are NOT installed in the Dockerfile, so they NEVER ship to the HF Space.
+# They exist only for the offline CLIP baseline comparison and the accuracy
+# chart produced by ml/eval.py (design.md §8). Install them in a separate local
+# experiments environment:
+#     python -m pip install -r requirements-experiments.txt
+matplotlib>=3.7,<4  # accuracy chart in ml/eval.py (experiments only)
+# OpenAI CLIP ViT-B/32 baseline. open_clip_torch is used instead of
+# git+https://github.com/openai/CLIP.git: it is a pip-installable, versioned
+# package (no VCS install), carries the same ViT-B/32 weights for the baseline,
+# and avoids the unpinned git dependency. Still experiments-only, never shipped.
+open_clip_torch>=2.20  # CLIP ViT-B/32 baseline in ml/eval.py (experiments only)
