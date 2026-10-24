@@ -80,10 +80,10 @@ def make_index(rows):
     return VectorIndex(vecs=vecs, labels=labels, source=source)
 
 
-def build(index, graph=None, headings=None, ocr_reader=None, top_k=10):
+def build(index, graph=None, headings=None, ocr_reader=None, top_k=10, rooms=None):
     graph = graph or synthetic_graph()
     return Backend(index, graph, headings or {}, FakeEmbedder(),
-                   ocr_reader=ocr_reader, top_k=top_k)
+                   ocr_reader=ocr_reader, top_k=top_k, rooms=rooms)
 
 
 # --- contract shape -------------------------------------------------------
@@ -269,6 +269,100 @@ def test_ocr_floor_override_picks_best_on_that_floor():
     assert result['confidence'] == pytest.approx(override_votes / backend.top_k)
     assert result['confidence'] == pytest.approx(0.1)
     assert round(result['confidence'] * backend.top_k) == override_votes
+
+
+# --- Goal 2: floor/hallway robustness -------------------------------------
+
+def test_wrong_floor_lookalike_is_corrected_by_ocr_floor():
+    # Voting picks a wrong-floor look-alike (F1_a wins 2-1), but OCR reads the
+    # correct floor 2: the override returns a spot on the OCR floor, and the
+    # contract dict shape stays intact with a valid 0..1 confidence.
+    red, blue = (255, 0, 0), (0, 0, 255)
+    rows = [(red, 'F1_a', 'video'), (red, 'F1_a', 'video'), (blue, 'F2_c', 'video')]
+    backend = build(make_index(rows), ocr_reader=lambda im: ('248', 2))
+    result = backend.locate(solid(red))
+    assert result['floor'] == 2
+    assert result['spot'] == 'F2_c'           # top3[0] on the OCR floor
+    assert result['top3'][0]['spot'] == 'F2_c'
+    assert backend._floor[result['spot']] == result['floor']  # API invariant
+    assert 0.0 <= result['confidence'] <= 1.0
+    assert set(result) == {'spot', 'floor', 'heading', 'confidence', 'top3',
+                           'ocr_room', 'ocr_floor', 'vector'}
+
+
+def test_ocr_room_resolved_via_rooms_json_sets_floor_without_numeral():
+    # The sign shows only a room number (no "Floor N"); the OCR reader returns
+    # floor=None. rooms.json maps that room to a known F2 node, so the backend
+    # still corrects the floor to 2 and returns a spot there.
+    red, blue = (255, 0, 0), (0, 0, 255)
+    rows = [(red, 'F1_a', 'video'), (red, 'F1_a', 'video'), (blue, 'F2_c', 'video')]
+    rooms = [{'room': '248', 'floor': 2, 'node': 'F2_c', 'name': 'Room 248'}]
+    backend = build(make_index(rows), ocr_reader=lambda im: ('248', None), rooms=rooms)
+    result = backend.locate(solid(red))
+    assert result['floor'] == 2
+    assert result['spot'] == 'F2_c'
+    assert result['ocr_room'] == '248' and result['ocr_floor'] is None
+    assert backend._floor[result['spot']] == result['floor']
+
+
+def test_rooms_json_entries_outside_scope_or_graph_are_ignored():
+    # Guarded loading: a bad floor, an unknown node, or a missing room must not
+    # enter the room->floor map (no hard dependency on rooms.json shape).
+    rooms = [
+        {'room': '305', 'floor': 3, 'node': 'F2_c'},    # floor out of scope
+        {'room': '777', 'floor': 2, 'node': 'ghost'},   # node not in graph
+        {'floor': 2, 'node': 'F2_c'},                   # no room key
+        {'room': '248', 'floor': 2, 'node': 'F2_c'},    # valid
+    ]
+    backend = build(make_index([((255, 0, 0), 'F1_a', 'video')]), rooms=rooms)
+    assert backend._room_floor == {'248': 2}
+
+
+def test_no_ocr_read_leaves_vote_unchanged():
+    # OCR reads nothing: the floor/spot stay exactly what voting produced.
+    red, blue = (255, 0, 0), (0, 0, 255)
+    rows = [(red, 'F1_a', 'video'), (red, 'F1_a', 'video'), (blue, 'F2_c', 'video')]
+    backend = build(make_index(rows), ocr_reader=lambda im: (None, None))
+    result = backend.locate(solid(red))
+    assert result['spot'] == 'F1_a' and result['floor'] == 1
+    assert result['ocr_room'] is None and result['ocr_floor'] is None
+
+
+def test_raised_gate_runs_ocr_on_middling_single_floor_vote():
+    # 8/10 votes (0.8 confidence) with a lone neighbor on another floor: below
+    # the 0.85 gate, so OCR runs even though top3 might not span floors here.
+    from ml.backend import OCR_CONFIDENCE_GATE
+    assert OCR_CONFIDENCE_GATE == 0.85
+    red = (255, 0, 0)
+    calls = []
+
+    def reader(image):
+        calls.append(image)
+        return None, None
+
+    # 8 red->F1_a, 2 green->F1_b, far apart so no neighborhood pooling: 0.8.
+    rows = [(red, 'F1_a', 'video')] * 8 + [((0, 128, 0), 'F1_b', 'video')] * 2
+    backend = build(make_index(rows), graph=far_graph(), ocr_reader=reader)
+    result = backend.locate(solid(red))
+    assert result['confidence'] == pytest.approx(0.8)
+    assert calls, 'OCR should run when confidence (0.8) is below the 0.85 gate'
+
+
+def test_clearly_confident_single_floor_still_skips_ocr():
+    # 9/10 single-floor vote (0.9 >= 0.85 gate) must still skip OCR: it stays
+    # gated so the latency cost is not paid on confident queries.
+    red = (255, 0, 0)
+    calls = []
+
+    def reader(image):
+        calls.append(image)
+        return None, None
+
+    backend = build(make_index([(red, 'F1_a', 'video')] * 9),
+                    graph=far_graph(), ocr_reader=reader)
+    result = backend.locate(solid(red))
+    assert result['confidence'] == pytest.approx(0.9)
+    assert calls == []
 
 
 # --- build_index unit test (tmp_path, not data/) --------------------------
