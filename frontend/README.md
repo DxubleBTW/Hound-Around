@@ -21,9 +21,13 @@ To use the real backend, copy `.env.example` to `.env.local` and set `VITE_API_U
 
 ## Vercel
 
-Project Settings → Build and Deployment → **Root Directory = `frontend`**, framework preset **Vite**.
+Live: **https://hound-around-theta.vercel.app**. Pushes to `main` deploy production; every branch/PR gets a preview link.
+
+No dashboard changes needed. The build is configured in the repo:
+- Root Directory = repo root (current setting): `/vercel.json` installs and builds `frontend/` and serves `frontend/dist`.
+- If Root Directory is ever set to `frontend`, `frontend/vercel.json` takes over and selects the Vite preset.
+
 Add `VITE_API_URL` under Environment Variables, then redeploy (Vite bakes it in at build time).
-Pushes to `main` deploy production; every branch/PR gets a preview link.
 
 ## Screens (`src/screens/`)
 
