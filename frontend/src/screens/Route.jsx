@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { route } from '../api.js'
-import { floorOf, spotName } from '../lib/spots.js'
+import { floorName, floorOf, spotName } from '../lib/spots.js'
 import { destinationLabel, resolveDestination } from '../lib/destinations.js'
+import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import PawBurst from '../components/PawBurst.jsx'
 
@@ -9,7 +10,14 @@ import PawBurst from '../components/PawBurst.jsx'
 // no "you are here" dot or coordinate. We make directions feel full using WORDS only
 // — the backend's own instruction prose plus the landmark it names. We parse the
 // instruction to surface "heading toward …" and a one-step-ahead preview; we never
-// re-derive or rewrite the directions themselves.
+// re-derive or rewrite the directions themselves. The only text transform we apply
+// is a DISPLAY-only reword (prettifyLandmark, see lib/directions.js) — the raw
+// backend prose and stepKind's prefix matching are untouched.
+//
+// The big arrow below is a RELATIVE "next move" cue (turn left/right/straight/
+// around/up/down), derived purely from the route step. It is NOT a magnetic or
+// device compass: this app has a hard no-sensors rule (no DeviceOrientationEvent,
+// no geolocation), so we never imply an absolute building bearing.
 
 // Classify a step by the EXACT instruction prefixes api/routing.py emits, so the
 // client never re-derives prose. Returns a kind used for the icon and the
@@ -49,6 +57,24 @@ function floorBadge(instruction = '') {
   if (token === '-1' || token === 'B1') return 'B1'
   if (/^\d+$/.test(token)) return token
   return token
+}
+
+// Numeric floor level for a floor code, so we can tell up from down without
+// inventing anything (B1 = -1, F1 = 1, F2 = 2). Returns null when unknown.
+function floorLevel(code) {
+  if (code === 'B1' || code === '-1') return -1
+  const n = Number(String(code || '').replace(/^F/, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+// Relative travel direction for a vertical (elevator/stairs) step: 'up' | 'down'
+// | '', derived from the current node's floor vs. the instruction's target level.
+// Purely relative; never a magnetic bearing.
+function verticalDir(node, instruction = '') {
+  const from = floorLevel(floorOf(node).code)
+  const to = floorLevel(floorBadge(instruction))
+  if (from == null || to == null || from === to) return ''
+  return to > from ? 'up' : 'down'
 }
 
 export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination }) {
@@ -136,6 +162,13 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   // Full-screen floor-change card for elevator/stairs steps.
   if (!arrived && isVertical(kind)) {
     const badge = floorBadge(step.instruction)
+    // Plain move label + direction of travel, derived from the step kind and the
+    // destination level (never invented). "Go up" / "Go down" come from the
+    // current vs. target floor so the hero reads clearly.
+    const stairDir = verticalDir(step.node, step.instruction)
+    const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
+    const vMove = moveLabel(kind, levelName)
+    const prettyInstruction = prettifyLandmark(step.instruction)
     return (
       <main className={`${riseClass} flex flex-1 flex-col`}>
         <div className="mt-4 flex gap-1">
@@ -149,11 +182,12 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
               <span className="font-display text-5xl font-extrabold leading-none">{badge}</span>
             </span>
           )}
-          <span className="flex h-24 w-24 items-center justify-center rounded-2xl bg-paper/10 text-paper">
-            <TurnIcon kind={kind} big bare />
-          </span>
+          {/* Hero: large up/down arrow for the vertical move (relative, not a
+              compass). Falls back to the elevator/stairs glyph when we can't tell. */}
+          <DirectionArrow kind={kind} dir={stairDir} aria={arrowAria(kind)} onPaper />
           <p className="mt-6 text-sm font-semibold uppercase tracking-wider text-paper/80">Change floors</p>
-          <p className="mt-3 font-display text-3xl font-extrabold leading-[1.08] tracking-tight">{step.instruction}</p>
+          <p className="mt-2 font-display text-4xl font-extrabold leading-none tracking-tight">{vMove}</p>
+          <p className="mt-3 text-base font-medium text-paper/85">{prettyInstruction}</p>
         </section>
         <div className="space-y-3 pt-6">
           <div className="grid grid-cols-[1fr_2fr] gap-3">
@@ -169,11 +203,19 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   // Words-only context for the current step (no map): the landmark we're heading
   // toward, the next step preview, and the current floor — all derived from the
   // backend's own data.
-  const toward = step ? headingToward(step.instruction) : ''
+  // Landmark context, reworded for DISPLAY only (corridor -> hallway, etc.).
+  const toward = step ? prettifyLandmark(headingToward(step.instruction)) : ''
   const nextStep = steps[i + 1]
-  const nextToward = nextStep ? headingToward(nextStep.instruction) : ''
+  const nextKind = nextStep ? stepKind(nextStep.instruction) : null
+  const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction)) : ''
   const floorHere = step ? stepFloorName(step.node) : ''
   const destText = destinationLabel(resolvedDest)
+  // Plain move label from the step kind — the "points you the right way" cue. For
+  // a clean primary line we lead with this move, then the reworded landmark. We
+  // never invent a turn/distance the backend didn't give; the raw instruction is
+  // kept as supporting text below.
+  const move = kind ? moveLabel(kind) : ''
+  const primary = toward ? `${move} toward ${toward.toLowerCase()}` : move
 
   return (
     <main className={`${riseClass} flex flex-1 flex-col`}>
@@ -199,29 +241,35 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
       </div>
 
       {!arrived ? (
-        <section key={i} className={`${stepAnim} mt-7 flex-1`}>
-          <div className="flex items-center gap-4">
-            <TurnIcon kind={kind} />
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
-              {floorHere && <p className="text-xs font-medium text-muted">{floorHere}</p>}
-            </div>
+        <section key={i} className={`${stepAnim} mt-5 flex-1`}>
+          <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
+          {floorHere && <p className="text-xs font-medium text-muted">{floorHere}</p>}
+          {/* Hero: the big relative "next move" arrow + plain-language label. This is
+              the "points you the right way" cue the user asked for — a relative turn,
+              not a device compass. */}
+          <div className="mt-5 flex flex-col items-center text-center">
+            <DirectionArrow kind={kind} aria={arrowAria(kind)} />
+            <p className="mt-4 font-display text-5xl font-extrabold leading-none tracking-tight">{move}</p>
           </div>
-          {/* Authoritative step text, exactly as the backend emits it. */}
-          <p className="mt-4 font-display text-[2.9rem] font-extrabold leading-[1.04] tracking-tight">{step.instruction}</p>
+          {/* Clean, surroundings-driven primary line: move + reworded landmark. */}
+          <p className="mt-5 text-center font-display text-2xl font-bold leading-[1.12] tracking-tight">{primary}</p>
+          {/* Authoritative backend step text, reworded for display only. */}
+          <p className="mt-3 text-center text-sm text-muted">{prettifyLandmark(step.instruction)}</p>
           {/* Surroundings in words: the landmark you're walking toward. */}
           {toward && (
-            <p className="mt-3 text-lg text-muted">
+            <p className="mt-4 text-center text-lg text-muted">
               <span className="font-semibold text-ink">Heading toward:</span> {toward}
             </p>
           )}
-          {step.meters > 0 && <p className="mt-3 text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
+          {step.meters > 0 && <p className="mt-2 text-center text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
           {/* One-step-ahead "what's next" preview — the privacy-safe substitute for a map. */}
           {nextStep && (
-            <div className="mt-6 rounded-2xl border border-line bg-ink/[.03] p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted">Then</p>
-              <p className="mt-1 font-medium leading-snug">{nextStep.instruction}</p>
-              {nextToward && <p className="mt-0.5 text-sm text-muted">toward {nextToward}</p>}
+            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-line bg-ink/[.03] p-4">
+              <TurnIcon kind={nextKind} />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Then</p>
+                <p className="mt-1 font-medium leading-snug">{moveLabel(nextKind)}{nextToward ? ` toward ${nextToward.toLowerCase()}` : ''}</p>
+              </div>
             </div>
           )}
         </section>
@@ -245,6 +293,39 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
         {!arrived && <button onClick={onRestart} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">Lost? Snap again</button>}
       </div>
     </main>
+  )
+}
+
+// The big, prominent RELATIVE directional arrow — the visual hero of the step.
+// Derived purely from the step kind (and, for vertical moves, an up/down `dir`),
+// it points the next move: left / right / straight-ahead / U-turn / up / down.
+//
+// NOTE: this is a RELATIVE turn arrow, NOT a device/magnetic compass. The app has
+// a hard no-sensors rule (no DeviceOrientationEvent, no geolocation), so it never
+// implies an absolute building bearing — only "your next move is this way". The
+// subtle nudge animation is gated by prefers-reduced-motion via index.css. The
+// box is comfortably >= 44px and the move is announced to screen readers.
+function DirectionArrow({ kind, dir = '', aria = '', onPaper = false }) {
+  const reduced = prefersReducedMotion()
+  // For vertical steps, resolve to an explicit up/down arrow when we know which
+  // way; otherwise fall back to the elevator/stairs glyph.
+  const arrowKind = isVertical(kind) ? (dir === 'up' ? 'up' : dir === 'down' ? 'down' : kind) : kind
+  // Gentle nudge in the direction of travel (purely decorative, relative only).
+  const nudge = {
+    left: { '--nudge-x': '-4px' }, right: { '--nudge-x': '4px' },
+    up: { '--nudge-y': '-4px' }, down: { '--nudge-y': '4px' },
+    continue: { '--nudge-y': '-4px' }, walk: { '--nudge-y': '-4px' },
+    around: { '--nudge-y': '-3px' },
+  }[arrowKind] || {}
+  const tone = onPaper ? 'bg-paper/10 text-paper ring-1 ring-paper/20' : 'bg-scarlet/10 text-scarlet'
+  return (
+    <span role="img" aria-label={aria} className={`flex h-28 w-28 items-center justify-center rounded-3xl ${tone}`}>
+      <span className={reduced ? '' : 'arrow-nudge'} style={nudge} aria-hidden>
+        <svg width={76} height={76} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {glyph(arrowKind)}
+        </svg>
+      </span>
+    </span>
   )
 }
 
@@ -277,7 +358,10 @@ function glyph(kind) {
       return <><path d="M9 20V10a4 4 0 0 1 8 0v4" /><path d="M6 11l3 3 3-3" /></>
     case 'continue':
     case 'walk':
+    case 'up':
       return <><path d="M12 20V5" /><path d="M6 11l6-6 6 6" /></>
+    case 'down':
+      return <><path d="M12 4v15" /><path d="M6 13l6 6 6-6" /></>
     case 'elevator':
       return <><rect x="6" y="3" width="12" height="18" rx="1" /><path d="M12 8l-2 2h4l-2-2z" /><path d="M12 16l-2-2h4l-2 2z" /></>
     case 'stairs':
