@@ -98,6 +98,21 @@ Activation still requires:
 
 Setup commands and limitations: [navigation features](navigation-features-proposal.md).
 
+## Classroom door-number follow-up
+
+The follow-up on `fix/physical-room-labels` replaces capacity labels with the six
+already public room-number aliases checked against live route destinations. The
+labels are scoped to BU/CDS and used in confirmation, picker, route overview, and
+legacy direction display. Capacity destinations are removed. Backend directions
+prefer a single numeric alias from the private room table; missing or ambiguous
+classroom mappings remain explicitly unconfirmed. No API fields/endpoints change.
+
+Verification: 134 backend tests, 68 frontend tests, production build, and synthetic
+mobile-browser checks passed. Physical door-sign verification and backend deployment
+are separate; the live route aliases do not prove the on-site mappings are correct.
+See [classroom label handoff](handoff-classroom-labels.md) for the public alias set,
+private-data update steps, and remaining verification.
+
 ## Open work, by owner
 
 | Priority | Task | Owner |

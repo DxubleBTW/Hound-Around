@@ -38,6 +38,8 @@ test('BU keeps the merged destinations while another school does not inherit its
   assert.equal(bu.resolvePlace('floor 2 restroom'), 'F2_restrooms')
   const other = buildingConfig('synthetic', 'demo', {VITE_SYNTHETIC_API:'https://school.example'}, campuses)
   assert.deepEqual(other.destinations, [])
+  assert.deepEqual(other.roomLabels, {})
+  assert.equal(bu.roomLabels.F2_class48a, 'Room 262')
   assert.equal(other.resolvePlace('floor 2 restroom'), 'floor 2 restroom')
 })
 

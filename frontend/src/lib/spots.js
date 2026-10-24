@@ -5,7 +5,7 @@ const FLOOR_NAMES = { B1: 'Lower level', F1: 'Floor 1', F2: 'Floor 2' }
 
 const WORDS = {
   hall: 'Hallway', core: 'Tower', podium: 'Podium', elev: 'elevators', stair: 'Stairs',
-  lobby: 'Lobby', cafe: 'Café', entry: 'entrance', restrooms: 'Restrooms', class70: '70-seat classroom',
+  lobby: 'Lobby', cafe: 'Café', entry: 'entrance', restrooms: 'Restrooms',
   e: 'east', w: 'west', n: 'north', s: 'south',
 }
 
@@ -20,13 +20,14 @@ export function floorName(floorNum) {
   return `Floor ${floorNum}`
 }
 
-export function spotName(spot) {
+export function spotName(spot, roomLabels = {}) {
   if (!spot) return 'Unknown spot'
+  if (Object.hasOwn(roomLabels, spot)) return roomLabels[spot]
   const parts = String(spot).split('_').slice(1)
   const words = parts.map((p) => {
     // Walk-sheet classroom IDs encode capacity, not the number on the door.
     const classroom = p.match(/^class(\d+)([a-z]?)$/)
-    if (classroom) return `${classroom[1]}-seat classroom${classroom[2] ? ` ${classroom[2].toUpperCase()}` : ''}`
+    if (classroom) return 'classroom (room number unconfirmed)'
     const room = p.match(/^room(\w+)$/)
     if (room) return `Room ${room[1]}`
     const m = p.match(/^([a-z]+)(\d+)$/)

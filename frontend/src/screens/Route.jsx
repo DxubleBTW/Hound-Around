@@ -77,7 +77,7 @@ function verticalDir(node, instruction = '') {
   return to > from ? 'up' : 'down'
 }
 
-export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination }) {
+export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination, roomLabels = {} }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -134,7 +134,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
     return (
       <main className="rise flex flex-1 flex-col justify-center text-center">
         <p className="font-display text-2xl font-bold">
-          {error.unknownDest ? 'Can’t find that place' : `Couldn’t find a route to ${destinationLabel(resolvedDest)}`}
+          {error.unknownDest ? 'Can’t find that place' : `Couldn’t find a route to ${destinationLabel(resolvedDest, roomLabels)}`}
         </p>
         <p role="alert" className="mt-2 text-sm text-muted">{error.message}</p>
         {/* A retry only helps when the destination itself is valid; for an unknown
@@ -168,7 +168,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
     const stairDir = verticalDir(step.node, step.instruction)
     const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
     const vMove = moveLabel(kind, levelName)
-    const prettyInstruction = prettifyLandmark(step.instruction)
+    const prettyInstruction = prettifyLandmark(step.instruction, roomLabels[step.node])
     return (
       <main className={`${riseClass} flex flex-1 flex-col`}>
         <div className="mt-4 flex gap-1">
@@ -204,12 +204,12 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   // toward, the next step preview, and the current floor — all derived from the
   // backend's own data.
   // Landmark context, reworded for DISPLAY only (corridor -> hallway, etc.).
-  const toward = step ? prettifyLandmark(headingToward(step.instruction)) : ''
+  const toward = step ? prettifyLandmark(headingToward(step.instruction), roomLabels[step.node]) : ''
   const nextStep = steps[i + 1]
   const nextKind = nextStep ? stepKind(nextStep.instruction) : null
-  const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction)) : ''
+  const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction), roomLabels[nextStep.node]) : ''
   const floorHere = step ? stepFloorName(step.node) : ''
-  const destText = destinationLabel(resolvedDest)
+  const destText = destinationLabel(resolvedDest, roomLabels)
   // Plain move label from the step kind — the "points you the right way" cue. For
   // a clean primary line we lead with this move, then the reworded landmark. We
   // never invent a turn/distance the backend didn't give; the raw instruction is
@@ -223,7 +223,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
       <section className="mt-4 rounded-2xl border border-line bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <p className="min-w-0 text-sm text-muted">
-            <span className="font-medium text-ink">{spotName(from) || from}</span>
+            <span className="font-medium text-ink">{spotName(from, roomLabels) || from}</span>
             <span className="mx-1.5" aria-hidden>→</span>
             <span className="font-medium text-ink">{destText}</span>
           </p>
@@ -254,7 +254,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
           {/* Clean, surroundings-driven primary line: move + reworded landmark. */}
           <p className="mt-5 text-center font-display text-2xl font-bold leading-[1.12] tracking-tight">{primary}</p>
           {/* Authoritative backend step text, reworded for display only. */}
-          <p className="mt-3 text-center text-sm text-muted">{prettifyLandmark(step.instruction)}</p>
+          <p className="mt-3 text-center text-sm text-muted">{prettifyLandmark(step.instruction, roomLabels[step.node])}</p>
           {/* Surroundings in words: the landmark you're walking toward. */}
           {toward && (
             <p className="mt-4 text-center text-lg text-muted">
