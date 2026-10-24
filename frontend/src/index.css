@@ -58,10 +58,20 @@ body {
 @keyframes grow-x { from { transform: scaleX(0) } to { transform: scaleX(1) } }
 .grow-x { transform-origin: left; animation: grow-x .55s cubic-bezier(.2,.7,.3,1) both; }
 
+/* Relative "next move" arrow: a gentle nudge in the move's direction. This is a
+   RELATIVE turn cue, never a magnetic/device compass (hard no-sensors rule), so
+   the motion is a subtle breathing nudge, not a spinning needle. The direction
+   of travel is set per-kind via --nudge-x / --nudge-y. */
+@keyframes arrow-nudge {
+  0%, 100% { transform: translate(0, 0) }
+  50% { transform: translate(var(--nudge-x, 0), var(--nudge-y, 0)) }
+}
+.arrow-nudge { animation: arrow-nudge 1.6s ease-in-out infinite; }
+
 /* Honor the user's motion preference: every animation collapses to a static end state. */
 @media (prefers-reduced-motion: reduce) {
   .scan-line, .sniff, .rise, .rise-left, .rise-right, .drift,
-  .pulse-soft, .paw-trail > span, .burst, .spark, .grow-x {
+  .pulse-soft, .paw-trail > span, .burst, .spark, .grow-x, .arrow-nudge {
     animation: none !important;
   }
   .drift { background-position: 50% 50%; }
