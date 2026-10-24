@@ -6,12 +6,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # DINOv2 (transformers) uses HF_HOME; EasyOCR uses EASYOCR_MODULE_PATH.
     HF_HOME=/app/caches/hf \
     TRANSFORMERS_CACHE=/app/caches/hf \
-    EASYOCR_MODULE_PATH=/app/caches/easyocr
+    EASYOCR_MODULE_PATH=/app/caches/easyocr \
+    # Turn on real recognition and allow the production frontend. Defaults only:
+    # Space variables with the same names override these at runtime.
+    HOUND_ML_FACTORY=ml.backend:create_backend \
+    HOUND_CORS_ORIGINS=https://www.hound-around.tech,https://hound-around.tech,https://hound-around-theta.vercel.app,http://localhost:5173
 WORKDIR /app
 COPY requirements.txt .
-# Install the CPU-only torch wheel first so no CUDA wheels are pulled, then the
-# rest of the runtime deps from requirements.txt (torch is already satisfied).
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+# Install CPU-only torch AND torchvision first so no CUDA wheels are pulled, then the
+# rest of the runtime deps from requirements.txt (both already satisfied). torchvision
+# must come from the CPU index too: easyocr needs it, and a PyPI torchvision whose torch
+# pin doesn't match would make pip swap in the ~2 GB CUDA torch.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 1000 app \
     && mkdir -p /app/data /app/caches/hf /app/caches/easyocr \
