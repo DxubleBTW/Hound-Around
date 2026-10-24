@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "name": "Contract guard",
+  "description": "When the contract or a contract-facing file is saved, check that the code produces and consumes exactly the contract's fields and list mismatches. Never edit the contract.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "docs/contract.md",
+      "api/main.py",
+      "ml/backend.py",
+      "frontend/src/api.js"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A contract-facing file was saved. Read docs/contract.md as the single source of truth. Then check that api/main.py (produces/validates), ml/backend.py (produces the locate() dict + internal vector), and frontend/src/api.js (consumes) agree with the contract EXACTLY on: endpoint set and methods; every field name; every field type; nullability (which fields may be null); numeric literals (floor is -1|1|2, confidence 0..1, top3 length 1..3); and the internal `vector` key being stripped by the API. List every mismatch as a bullet with the file, the field, and the expected-vs-actual. If everything matches, say so. NEVER edit docs/contract.md — it is law. If the code genuinely needs a contract change, say that it must be raised as an open question in the requirements and approved by the whole team. Do not stage or commit anything."
+  }
+}
