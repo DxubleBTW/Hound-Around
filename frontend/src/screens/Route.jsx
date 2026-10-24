@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { route } from '../api.js'
 import { spotName } from '../lib/spots.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
+import PawBurst from '../components/PawBurst.jsx'
 
 // Ethics rule from the brief: no public building map. Users only see their next turn.
 
@@ -20,11 +21,28 @@ function stepKind(instruction = '') {
 
 const isVertical = (k) => k === 'elevator' || k === 'stairs'
 
+// Pull the destination level out of "Take the elevator to 1, toward ..." for the
+// big floor badge. Backend emits the level token; we only display it, never invent it.
+function floorBadge(instruction = '') {
+  const m = instruction.match(/to\s+(-?\d+|B\d+|[A-Za-z0-9]+),/)
+  if (!m) return null
+  const token = m[1]
+  if (token === '-1' || token === 'B1') return 'B1'
+  if (/^\d+$/.test(token)) return token
+  return token
+}
+
 export default function Route({ from, heading, dest, accessible, onRestart }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
+  const [dir, setDir] = useState('fwd') // which way the last step change moved
   const reduced = prefersReducedMotion()
+
+  // Advancing slides the next step in from the right ('rise-left'); going Back
+  // slides it in from the left. Reduced-motion users get the static state.
+  const go = (next) => { setDir(next >= i ? 'fwd' : 'back'); setI(next) }
+  const stepAnim = reduced ? '' : (dir === 'fwd' ? 'rise-left' : 'rise-right')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -59,7 +77,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
       <main className="rise flex flex-1 flex-col justify-center text-center">
         <p className="font-display text-2xl font-bold">Couldn’t find a route to {dest}</p>
         <p className="mt-2 text-sm text-muted">{error}</p>
-        <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white">Start over</button>
+        <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Start over</button>
       </main>
     )
   }
@@ -69,26 +87,37 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const arrived = i >= steps.length
   const step = steps[i]
   const kind = step ? stepKind(step.instruction) : null
-  const remaining = steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0)
+  // The backend reports real meters as floats (e.g. 12.345); show whole meters.
+  const remaining = Math.round(steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0))
   const mins = Math.max(1, Math.round((data.est_seconds * (remaining / (data.total_meters || 1))) / 60))
   const riseClass = reduced ? '' : 'rise'
 
   // Full-screen floor-change card for elevator/stairs steps.
   if (!arrived && isVertical(kind)) {
+    const badge = floorBadge(step.instruction)
     return (
       <main className={`${riseClass} flex flex-1 flex-col`}>
         <div className="mt-4 flex gap-1">
           {steps.map((_, k) => <span key={k} className={`h-1.5 flex-1 rounded-full ${k < i ? 'bg-scarlet' : k === i ? 'bg-scarlet/50' : 'bg-line'}`} />)}
         </div>
-        <section key={i} className={`${riseClass} flex flex-1 flex-col items-center justify-center text-center`}>
-          <TurnIcon kind={kind} big />
-          <p className="mt-6 text-sm font-semibold uppercase tracking-wider text-scarlet">Change floors</p>
-          <p className="mt-3 font-display text-4xl font-extrabold leading-[1.08] tracking-tight">{step.instruction}</p>
+        {/* Dark, immersive "moment" so a floor change reads as a distinct event. */}
+        <section key={i} className={`${stepAnim} mt-4 flex flex-1 flex-col items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-b from-ink to-scarlet-dark p-6 text-center text-paper shadow-[0_24px_50px_-20px_rgba(26,20,20,.7)]`}>
+          {badge && (
+            <span className="mb-6 flex h-28 w-28 flex-col items-center justify-center rounded-3xl bg-paper/10 ring-1 ring-paper/20">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-paper/70">Floor</span>
+              <span className="font-display text-5xl font-extrabold leading-none">{badge}</span>
+            </span>
+          )}
+          <span className="flex h-24 w-24 items-center justify-center rounded-2xl bg-paper/10 text-paper">
+            <TurnIcon kind={kind} big bare />
+          </span>
+          <p className="mt-6 text-sm font-semibold uppercase tracking-wider text-paper/80">Change floors</p>
+          <p className="mt-3 font-display text-3xl font-extrabold leading-[1.08] tracking-tight">{step.instruction}</p>
         </section>
         <div className="space-y-3 pt-6">
           <div className="grid grid-cols-[1fr_2fr] gap-3">
-            <button onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold disabled:opacity-40">Back</button>
-            <button onClick={() => setI(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white">{i === steps.length - 1 ? 'I’m here' : 'Done'}</button>
+            <button onClick={() => go(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Back</button>
+            <button onClick={() => go(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{i === steps.length - 1 ? 'I’m here' : 'Done'}</button>
           </div>
           <button onClick={onRestart} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">Lost? Snap again</button>
         </div>
@@ -109,18 +138,18 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
       </div>
 
       {!arrived ? (
-        <section key={i} className={`${riseClass} mt-8 flex-1`}>
+        <section key={i} className={`${stepAnim} mt-8 flex-1`}>
           <div className="flex items-center gap-4">
             <TurnIcon kind={kind} />
             <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
           </div>
-          <p className="mt-3 font-display text-4xl font-extrabold leading-[1.08] tracking-tight">{step.instruction}</p>
-          {step.meters > 0 && <p className="mt-4 text-lg text-muted">about {step.meters} m</p>}
-          <p className="mt-8 text-sm text-muted">{remaining} m left · ~{mins} min</p>
+          <p className="mt-4 font-display text-[2.75rem] font-extrabold leading-[1.05] tracking-tight">{step.instruction}</p>
+          {step.meters > 0 && <p className="mt-4 text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
+          <p className="mt-8 inline-flex rounded-full bg-ink/5 px-3 py-1 text-sm font-medium text-muted">{remaining} m left · ~{mins} min</p>
         </section>
       ) : (
         <section className={`${riseClass} mt-12 flex-1 text-center`}>
-          <p className="text-6xl">🐾</p>
+          <PawBurst size={96} className="mx-auto" />
           <p className="mt-4 font-display text-4xl font-extrabold">You’ve arrived.</p>
           <p className="mt-2 text-muted">Room {dest}. Good dog.</p>
         </section>
@@ -129,11 +158,11 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
       <div className="space-y-3 pt-6">
         {!arrived ? (
           <div className="grid grid-cols-[1fr_2fr] gap-3">
-            <button onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold disabled:opacity-40">Back</button>
-            <button onClick={() => setI(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white">{i === steps.length - 1 ? 'I’m here' : 'Next'}</button>
+            <button onClick={() => go(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Back</button>
+            <button onClick={() => go(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{i === steps.length - 1 ? 'I’m here' : 'Next'}</button>
           </div>
         ) : (
-          <button onClick={onRestart} className="min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white">Find another room</button>
+          <button onClick={onRestart} className="min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Find another room</button>
         )}
         {!arrived && <button onClick={onRestart} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">Lost? Snap again</button>}
       </div>
@@ -142,15 +171,20 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
 }
 
 // Large turn icon keyed to the step kind. Sized >= 44px; `big` variant for the
-// full-screen floor-change card.
-function TurnIcon({ kind, big = false }) {
-  const box = big ? 'h-24 w-24' : 'h-12 w-12'
-  const size = big ? 56 : 30
+// full-screen floor-change card. `bare` drops the own background/color so the
+// icon can sit inside a surface the caller styles (e.g. the floor-change card).
+function TurnIcon({ kind, big = false, bare = false }) {
+  const size = big ? 60 : 36
+  const svg = (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {glyph(kind)}
+    </svg>
+  )
+  if (bare) return <span aria-hidden>{svg}</span>
+  const box = big ? 'h-24 w-24' : 'h-14 w-14'
   return (
     <span className={`flex ${box} shrink-0 items-center justify-center rounded-2xl bg-scarlet/10 text-scarlet`} aria-hidden>
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        {glyph(kind)}
-      </svg>
+      {svg}
     </span>
   )
 }

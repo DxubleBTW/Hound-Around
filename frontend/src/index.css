@@ -27,3 +27,43 @@ body {
 
 @keyframes rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
 .rise { animation: rise .35s ease-out both; }
+
+/* Screen-to-screen entrance variants (step transitions slide toward travel). */
+@keyframes rise-left { from { opacity: 0; transform: translateX(28px) } to { opacity: 1; transform: none } }
+.rise-left { animation: rise-left .32s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes rise-right { from { opacity: 0; transform: translateX(-28px) } to { opacity: 1; transform: none } }
+.rise-right { animation: rise-right .32s cubic-bezier(.2,.7,.3,1) both; }
+
+/* Slow drifting gradient for the hero, tied to the "sniffing around" theme. */
+@keyframes drift { 0%,100% { background-position: 0% 50% } 50% { background-position: 100% 50% } }
+.drift { background-size: 200% 200%; animation: drift 9s ease-in-out infinite; }
+
+/* Breathing pulse for the live match meter / active status dot. */
+@keyframes pulse-soft { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity: .55; transform: scale(.88) } }
+.pulse-soft { animation: pulse-soft 1.4s ease-in-out infinite; }
+
+/* Paw trail: three dots fading in sequence while matching. */
+@keyframes paw-trail { 0%,100% { opacity: .25; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
+.paw-trail > span { animation: paw-trail 1.2s ease-in-out infinite; }
+.paw-trail > span:nth-child(2) { animation-delay: .18s; }
+.paw-trail > span:nth-child(3) { animation-delay: .36s; }
+
+/* Celebratory paw burst for the "it learned" moment and arrival flourish. */
+@keyframes burst { 0% { opacity: 0; transform: scale(.4) } 55% { opacity: 1; transform: scale(1.12) } 100% { opacity: 1; transform: scale(1) } }
+.burst { animation: burst .5s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes spark { 0% { opacity: 0; transform: translate(0,0) scale(.4) } 40% { opacity: 1 } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1) } }
+.spark { animation: spark .7s ease-out both; }
+
+/* Vote / meter bars grow to their target width. */
+@keyframes grow-x { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+.grow-x { transform-origin: left; animation: grow-x .55s cubic-bezier(.2,.7,.3,1) both; }
+
+/* Honor the user's motion preference: every animation collapses to a static end state. */
+@media (prefers-reduced-motion: reduce) {
+  .scan-line, .sniff, .rise, .rise-left, .rise-right, .drift,
+  .pulse-soft, .paw-trail > span, .burst, .spark, .grow-x {
+    animation: none !important;
+  }
+  .drift { background-position: 50% 50%; }
+  .grow-x { transform: none; }
+}
