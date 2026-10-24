@@ -2,6 +2,14 @@
 
 For Avery (or Avery's coding agent). From David, Sat Oct 24, 2026, about 1:30 PM.
 
+## Copy this into Vercel
+
+```
+VITE_API_URL=https://dribeiro0-hound-around.hf.space
+```
+
+Backend URL: **https://dribeiro0-hound-around.hf.space** (health check: https://dribeiro0-hound-around.hf.space/health)
+
 ## Goal
 
 The Vercel front end still runs on mock data. Switch it to the live backend by setting one environment variable and
