@@ -23,7 +23,15 @@ from ml.rejection import load_threshold, threshold_value
 
 TOP_K = 10
 # When the vote is this uncertain, OCR may help (design.md §4 / steering).
-OCR_CONFIDENCE_GATE = 0.8
+# The user reports look-alike hallways getting mixed up -- exactly the
+# middling-confidence case. Running OCR whenever the vote is not clearly
+# confident (and always when top3 spans floors) lets a readable door sign
+# correct the floor. Raised from 0.8 -> 0.85 so a 0.8 vote (8/10, one stray
+# neighbor on another floor) also consults the sign. OCR still stays GATED:
+# a clearly-confident single-floor vote (>= 0.85, e.g. 9/10) skips it, so the
+# EasyOCR pass (the main latency cost; the whole /locate call must stay under
+# the ~1s CPU budget) does not run on every query.
+OCR_CONFIDENCE_GATE = 0.85
 # Votes for spots within this many walking meters of the winner (same floor)
 # count toward its confidence. Look-alike neighbors (F2's east corridor) split
 # the vote, yet the route starts in the same place. On real footage, leave-one-
@@ -44,7 +52,7 @@ class Backend:
 
     def __init__(self, index: VectorIndex, graph: dict, headings: dict,
                  embed_fn, ocr_reader=None, model_name: str = MODEL_NAME,
-                 top_k: int = TOP_K, min_similarity=None):
+                 top_k: int = TOP_K, min_similarity=None, rooms=None):
         self.index = index
         self._embed = embed_fn
         self._ocr = ocr_reader
@@ -71,6 +79,21 @@ class Backend:
             for n in walk.nodes}
         # label -> most common labels.csv heading (design.md §3 / steering §6).
         self._heading = headings
+        # OCR room number -> floor, from rooms.json when available (contract:
+        # [{"room":"164","floor":1,"node":"F1_room164"}, ...]). Optional and
+        # guarded: the backend never hard-depends on rooms.json. Used to trust
+        # an OCR-read room that maps to a real node on a known floor, even when
+        # the sign carried no "Floor N" numeral. Only floors in scope
+        # (B1/F1/F2) and nodes that exist in the graph are kept.
+        self._room_floor: dict = {}
+        for entry in (rooms or []):
+            room = entry.get('room')
+            floor = entry.get('floor')
+            node = entry.get('node')
+            if (room is None or floor not in (-1, 1, 2)
+                    or node not in self._floor):
+                continue
+            self._room_floor[str(room)] = floor
 
     # -- handoff interface -----------------------------------------------
     @property
@@ -104,14 +127,20 @@ class Backend:
         ocr_room, ocr_floor = None, None
         if self._ocr is not None and (confidence < OCR_CONFIDENCE_GATE or len(floors_in_top3) > 1):
             ocr_room, ocr_floor = self._ocr(image)
-            if ocr_floor is not None and ocr_floor != floor:
+            # Trust the OCR room too: if it maps to a real room on a known
+            # floor (rooms.json), that floor is at least as authoritative as a
+            # "Floor N" numeral and covers signs that only show a room number.
+            target_floor = self._room_floor.get(ocr_room) if ocr_room else None
+            if target_floor is None:
+                target_floor = ocr_floor
+            if target_floor is not None and target_floor != floor:
                 # The sign's floor wins: re-vote over that floor's rows only, so
                 # the returned spot is top3[0] and the picker can offer it
                 # (review N03).
-                mask = np.array([self._floor.get(l) == ocr_floor for l in self.index.labels])
+                mask = np.array([self._floor.get(l) == target_floor for l in self.index.labels])
                 if mask.any():
                     ranked, _ = self.index.vote(vector, k=self.top_k, mask=mask)
-                    spot, floor = ranked[0]['spot'], ocr_floor
+                    spot, floor = ranked[0]['spot'], target_floor
                     confidence = self._confidence(ranked)
 
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
@@ -217,6 +246,17 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
     graph_path = data_dir / 'graph.json'
     graph = json.loads(graph_path.read_text()) if graph_path.exists() else {'nodes': [], 'edges': []}
 
+    # rooms.json is optional: used only to trust an OCR-read room's floor.
+    rooms = []
+    rooms_path = data_dir / 'rooms.json'
+    if rooms_path.exists():
+        try:
+            loaded = json.loads(rooms_path.read_text())
+            if isinstance(loaded, list):
+                rooms = loaded
+        except (ValueError, OSError):
+            rooms = []
+
     headings = {}
     for manifest in manifest_paths(data_dir):
         headings.update(load_headings(manifest))
@@ -227,7 +267,8 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
     model_name = getattr(embedder, 'model_name', MODEL_NAME) if embedder is not None else MODEL_NAME
     return Backend(index, graph, headings, embed_fn, ocr_reader=reader,
                    model_name=model_name, top_k=top_k,
-                   min_similarity=load_threshold(data_dir, index_path, model_name))
+                   min_similarity=load_threshold(data_dir, index_path, model_name),
+                   rooms=rooms)
 
 
 def _resolve_embedder(embedder):
