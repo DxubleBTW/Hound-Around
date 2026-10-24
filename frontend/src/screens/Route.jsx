@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 import { route } from '../api.js'
-import { spotName } from '../lib/spots.js'
+import { floorOf, spotName } from '../lib/spots.js'
+import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import PawBurst from '../components/PawBurst.jsx'
 
-// Ethics rule from the brief: no public building map. Users only see their next turn.
+// Ethics rule from the brief: NO public building map. No floor plan, no SVG layout,
+// no "you are here" dot or coordinate. We make directions feel full using WORDS only
+// — the backend's own instruction prose plus the landmark it names. We parse the
+// instruction to surface "heading toward …" and a one-step-ahead preview; we never
+// re-derive or rewrite the directions themselves.
 
 // Classify a step by the EXACT instruction prefixes api/routing.py emits, so the
 // client never re-derives prose. Returns a kind used for the icon and the
@@ -20,6 +25,20 @@ function stepKind(instruction = '') {
 }
 
 const isVertical = (k) => k === 'elevator' || k === 'stairs'
+
+// Pull the landmark tail out of the backend instruction, e.g.
+// "Turn right and walk toward Corridor by restrooms" -> "Corridor by restrooms".
+// Defensive: returns '' when there is no "toward" tail, so callers just show the
+// instruction. We only read what the backend emits; we never rewrite it.
+function headingToward(instruction = '') {
+  const m = instruction.match(/\btoward\s+(.+?)[.\s]*$/i)
+  return m ? m[1].trim() : ''
+}
+
+// Floor name for a step, derived from its node id via spots.js (never invented).
+function stepFloorName(node) {
+  return node ? floorOf(node).name : ''
+}
 
 // Pull the destination level out of "Take the elevator to 1, toward ..." for the
 // big floor badge. Backend emits the level token; we only display it, never invent it.
@@ -38,7 +57,10 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const [i, setI] = useState(0)
   const [dir, setDir] = useState('fwd') // which way the last step change moved
   const [attempt, setAttempt] = useState(0)
-  const requestKey = JSON.stringify([from, dest.trim(), accessible, heading])
+  // Resolve typed phrases ("floor 1 bathroom") to a value the backend understands.
+  // Unknown values pass through untouched and the backend 422s them (handled below).
+  const resolvedDest = resolveDestination(dest)
+  const requestKey = JSON.stringify([from, resolvedDest, accessible, heading])
   const data = response?.key === requestKey ? response.data : null
   const reduced = prefersReducedMotion()
 
@@ -54,7 +76,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
     setError('')
     setI(0)
     setDir('fwd')
-    const to = dest.trim()
+    const to = resolvedDest
     const run = (opts) => route(opts, { signal: controller.signal })
 
     run({ from, to, accessible, heading })
@@ -68,12 +90,16 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
         if (!live || e?.name === 'AbortError') return
         if (e?.status === 404 && accessible) {
           setError({ key: requestKey, message: 'No step-free route to that room. Choose another destination or check the route setting.' })
+        } else if (e?.status === 422) {
+          // Unknown room / node. There is no /spots endpoint to autocomplete from,
+          // so guide the user to a valid value instead of faking a list.
+          setError({ key: requestKey, unknownDest: true, message: `We don’t know a room or place called “${dest.trim()}”. Try a room number like 164, or pick one when you snap again.` })
         } else {
           setError({ key: requestKey, message: e?.message || 'Couldn’t plan that route. Try again.' })
         }
       })
     return () => { live = false; controller.abort() }
-  }, [from, dest, accessible, heading, requestKey, attempt])
+  }, [from, resolvedDest, accessible, heading, requestKey, attempt])
 
   // Short vibration on each step change, where supported and motion is allowed.
   useEffect(() => { if (data) tick(15) }, [i, data])
@@ -81,10 +107,18 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   if (error && error.key === requestKey) {
     return (
       <main className="rise flex flex-1 flex-col justify-center text-center">
-        <p className="font-display text-2xl font-bold">Couldn’t find a route to {dest}</p>
+        <p className="font-display text-2xl font-bold">
+          {error.unknownDest ? 'Can’t find that place' : `Couldn’t find a route to ${destinationLabel(resolvedDest)}`}
+        </p>
         <p role="alert" className="mt-2 text-sm text-muted">{error.message}</p>
-        <button onClick={() => setAttempt((value) => value + 1)} className="mt-6 min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Try again</button>
-        <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Start over</button>
+        {/* A retry only helps when the destination itself is valid; for an unknown
+            destination we send the user back to choose one instead. */}
+        {!error.unknownDest && (
+          <button onClick={() => setAttempt((value) => value + 1)} className="mt-6 min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Try again</button>
+        )}
+        <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
+          {error.unknownDest ? 'Pick another destination' : 'Start over'}
+        </button>
       </main>
     )
   }
@@ -132,33 +166,70 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
     )
   }
 
+  // Words-only context for the current step (no map): the landmark we're heading
+  // toward, the next step preview, and the current floor — all derived from the
+  // backend's own data.
+  const toward = step ? headingToward(step.instruction) : ''
+  const nextStep = steps[i + 1]
+  const nextToward = nextStep ? headingToward(nextStep.instruction) : ''
+  const floorHere = step ? stepFloorName(step.node) : ''
+  const destText = destinationLabel(resolvedDest)
+
   return (
     <main className={`${riseClass} flex flex-1 flex-col`}>
-      <div className="mt-4 flex items-center justify-between text-sm">
-        <span className="font-medium text-muted">From {spotName(from)}</span>
-        {accessible && <span className="rounded-full bg-ink/5 px-2.5 py-0.5 font-medium">♿ Elevators only</span>}
-      </div>
-      <h2 className="mt-1 font-display text-xl font-bold">To Room {dest}</h2>
+      {/* Journey overview: from → to in words, distance + time, floor badge. */}
+      <section className="mt-4 rounded-2xl border border-line bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 text-sm text-muted">
+            <span className="font-medium text-ink">{spotName(from)}</span>
+            <span className="mx-1.5" aria-hidden>→</span>
+            <span className="font-medium text-ink">{destText}</span>
+          </p>
+          {accessible && <span className="shrink-0 rounded-full bg-ink/5 px-2.5 py-0.5 text-xs font-medium">♿ Elevators only</span>}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+          {floorHere && <span className="rounded-full bg-scarlet/10 px-2.5 py-0.5 text-scarlet">{floorHere}</span>}
+          <span className="rounded-full bg-ink/5 px-2.5 py-0.5 text-muted">{remaining} m left · ~{mins} min</span>
+          <span className="rounded-full bg-ink/5 px-2.5 py-0.5 text-muted">{Math.round(data.total_meters)} m total</span>
+        </div>
+      </section>
 
       <div className="mt-4 flex gap-1">
         {steps.map((_, k) => <span key={k} className={`h-1.5 flex-1 rounded-full ${k < i ? 'bg-scarlet' : k === i ? 'bg-scarlet/50' : 'bg-line'}`} />)}
       </div>
 
       {!arrived ? (
-        <section key={i} className={`${stepAnim} mt-8 flex-1`}>
+        <section key={i} className={`${stepAnim} mt-7 flex-1`}>
           <div className="flex items-center gap-4">
             <TurnIcon kind={kind} />
-            <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
+              {floorHere && <p className="text-xs font-medium text-muted">{floorHere}</p>}
+            </div>
           </div>
-          <p className="mt-4 font-display text-[2.75rem] font-extrabold leading-[1.05] tracking-tight">{step.instruction}</p>
-          {step.meters > 0 && <p className="mt-4 text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
-          <p className="mt-8 inline-flex rounded-full bg-ink/5 px-3 py-1 text-sm font-medium text-muted">{remaining} m left · ~{mins} min</p>
+          {/* Authoritative step text, exactly as the backend emits it. */}
+          <p className="mt-4 font-display text-[2.9rem] font-extrabold leading-[1.04] tracking-tight">{step.instruction}</p>
+          {/* Surroundings in words: the landmark you're walking toward. */}
+          {toward && (
+            <p className="mt-3 text-lg text-muted">
+              <span className="font-semibold text-ink">Heading toward:</span> {toward}
+            </p>
+          )}
+          {step.meters > 0 && <p className="mt-3 text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
+          {/* One-step-ahead "what's next" preview — the privacy-safe substitute for a map. */}
+          {nextStep && (
+            <div className="mt-6 rounded-2xl border border-line bg-ink/[.03] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted">Then</p>
+              <p className="mt-1 font-medium leading-snug">{nextStep.instruction}</p>
+              {nextToward && <p className="mt-0.5 text-sm text-muted">toward {nextToward}</p>}
+            </div>
+          )}
         </section>
       ) : (
         <section className={`${riseClass} mt-12 flex-1 text-center`}>
           <PawBurst size={96} className="mx-auto" />
           <p className="mt-4 font-display text-4xl font-extrabold">You’ve arrived.</p>
-          <p className="mt-2 text-muted">Room {dest}. Good dog.</p>
+          <p className="mt-2 text-muted">{destText}. Good dog.</p>
         </section>
       )}
 
