@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
+import { ALL_DESTS, resolveDestination } from '../lib/destinations.js'
 
-const QUICK = [
-  { value: '164', name: 'Room 164 · Closing Ceremony' },
-  { value: 'B62', name: 'B62' },
-]
-
-export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto, onManual, destinations = QUICK }) {
+export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto, onManual, destinations = ALL_DESTS, destinationGroups, resolvePlace = resolveDestination }) {
+  const groups = destinationGroups || [{ title: 'Destinations', items: destinations }]
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState('')
@@ -55,24 +52,43 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
         </div>
       </header>
 
-      <section className="mt-8 space-y-3">
-        <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
-        <input
-          id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-          placeholder={destinations[0]?.value ? `Room number, e.g. ${destinations[0].value}` : 'Room number or name'}
-          list="destination-suggestions"
-          className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
-          autoComplete="off" inputMode="text"
-        />
-        <datalist id="destination-suggestions">
-          {destinations.map((item) => <option key={item.value} value={item.value}>{item.name || item.label}</option>)}
-        </datalist>
-        <div className="flex flex-wrap gap-2">
-          {destinations.slice(0, 4).map((q) => (
-            <button key={q.value} onClick={() => setDest(q.value)}
-              className={`min-h-[44px] rounded-full border px-3 py-1.5 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${dest === q.value ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted'}`}>
-              {q.name || q.label}
-            </button>
+      <section className="mt-8 space-y-4">
+        <div className="space-y-2">
+          <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
+          <input
+            id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
+            onBlur={(e) => { const r = resolvePlace(e.target.value); if (r !== e.target.value) setDest(r) }}
+            list="dest-suggestions"
+            placeholder={destinations[0]?.value ? `Room number or place, e.g. ${destinations[0].value}` : 'Room number or place'}
+            className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
+            autoComplete="off" inputMode="text"
+            aria-describedby="dest-hint"
+          />
+          {/* Suggestions are drawn ONLY from the verified set so nothing implies rooms we can't route to. */}
+          <datalist id="dest-suggestions">
+            {destinations.map((d) => <option key={d.value} value={d.value}>{d.label || d.name}</option>)}
+          </datalist>
+          <p id="dest-hint" className="text-xs text-muted">Type a room number or choose one of this building’s suggestions.</p>
+        </div>
+
+        {/* Grouped quick-picks: a tidy, scrollable chip set from verified-real destinations only. */}
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <div key={group.title}>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</p>
+              <div className="flex flex-wrap gap-2">
+                {group.items.map((q) => {
+                  const active = resolvePlace(dest) === q.value
+                  return (
+                    <button key={q.value} type="button" onClick={() => setDest(q.value)}
+                      aria-pressed={active}
+                      className={`min-h-[44px] rounded-full border px-3.5 py-2 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${active ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted hover:border-scarlet/40'}`}>
+                      {q.label || q.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ))}
         </div>
 

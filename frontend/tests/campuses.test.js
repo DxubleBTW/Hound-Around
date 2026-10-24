@@ -31,6 +31,16 @@ test('unknown schools/buildings never silently select the default index', () => 
   assert.equal(buildingConfig('bu', 'unknown', {}, campuses), null)
 })
 
+test('BU keeps the merged destinations while another school does not inherit its aliases', () => {
+  const bu = buildingConfig('bu', 'cds')
+  assert.equal(bu.destinations.find((item) => item.value === '164').label, 'Room 164')
+  assert.ok(bu.destinations.some((item) => item.value === 'F2_restrooms'))
+  assert.equal(bu.resolvePlace('floor 2 restroom'), 'F2_restrooms')
+  const other = buildingConfig('synthetic', 'demo', {VITE_SYNTHETIC_API:'https://school.example'}, campuses)
+  assert.deepEqual(other.destinations, [])
+  assert.equal(other.resolvePlace('floor 2 restroom'), 'floor 2 restroom')
+})
+
 test('building clients keep requests and photo corrections scoped without mutating a global base', async (t) => {
   const urls = []
   t.mock.method(globalThis, 'fetch', async (url) => {

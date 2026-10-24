@@ -1,15 +1,17 @@
 // Explicitly public school/building metadata. No floor plans, graph edges,
 // private node directory, photos, or credentials belong in this catalog.
 // Add another school only after its separate backend/data package is reviewed.
+import { ALL_DESTS, DEST_GROUPS, resolveDestination } from './destinations.js'
+
+const passThrough = (input) => String(input || '').trim()
+
 export const CAMPUSES = [{
   id: 'bu', name: 'Boston University',
   buildings: [{
     id: 'cds', name: 'Center for Computing & Data Sciences', shortName: 'CDS',
     apiEnv: 'VITE_API_URL', enabled: true,
-    destinations: [
-      { value: '164', name: 'Room 164 · Closing Ceremony' },
-      { value: 'B62', name: 'B62' },
-    ],
+    destinations: ALL_DESTS,
+    destinationGroups: DEST_GROUPS,
     landmarks: [], // Only explicitly approved public landmark IDs may be added.
   }],
 }]
@@ -34,5 +36,6 @@ export function buildingConfig(schoolId, buildingId, env = {}, campuses = CAMPUS
   const isDefault = schoolId === 'bu' && buildingId === 'cds'
   return { ...building, schoolId, schoolName: school.name, apiBase: base,
     available: building.enabled === true && (base ? validBase(base) : isDefault),
-    destinations: building.destinations || [], landmarks: building.landmarks || [] }
+    destinations: building.destinations || [], landmarks: building.landmarks || [],
+    resolvePlace: isDefault ? resolveDestination : passThrough }
 }

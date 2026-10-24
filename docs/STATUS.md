@@ -78,7 +78,7 @@ and rollback, calibrated unrelated-photo rejection, and automated software check
 It preserves the four existing endpoints and success payloads. A rejected photo
 returns a documented 422 error; the app asks for a new photo or a manual start.
 
-Local verification: **90 Python tests, 50 frontend tests, and the production build
+Local verification: **90 Python tests, 57 frontend tests, and the production build
 passed**. Python ran on 3.14 locally; CI is configured for the required 3.11 runtime.
 Browser checks used synthetic responses for retake/manual routing and isolated
 school switching. Read-only live health/CORS/accessible-route checks passed; these

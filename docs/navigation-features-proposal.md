@@ -58,7 +58,9 @@ error/recovery UI. Inferred room mappings still require verification on site.
 
 The capture field offers native, keyboard-accessible destination suggestions and
 quick choices. The public catalog is `frontend/src/lib/campuses.js`; it contains only
-the two destinations already shown by the app. Add additional verified public names
+the verified destination groups already merged in PR #16/#17, including the plain
+Room 164 label. These groups and typed-place resolution are preserved for BU/CDS;
+other buildings receive their own catalog and do not inherit CDS aliases. Add additional verified public names
 and aliases there after review. Never copy the private room/graph files into it.
 Approved starting landmarks can be added to a building's `landmarks` list as
 `{spot, label, floor}` records whose IDs exist in that building's private graph.

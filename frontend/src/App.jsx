@@ -113,6 +113,8 @@ function Navigation({ api, building, onSchoolChange }) {
           onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
           onManual={chooseStart}
           destinations={building.destinations}
+          destinationGroups={building.destinationGroups}
+          resolvePlace={building.resolvePlace}
         />
       )}
       {screen === 'locating' && (
@@ -139,6 +141,7 @@ function Navigation({ api, building, onSchoolChange }) {
           onRetake={restart}
           onManual={chooseStart}
           api={api}
+          buildingLabel={building.shortName || building.name}
         />
       )}
       {screen === 'manual' && (
@@ -150,6 +153,7 @@ function Navigation({ api, building, onSchoolChange }) {
           dest={dest} accessible={accessible}
           onRestart={restart}
           api={api}
+          resolvePlace={building.resolvePlace}
         />
       )}
 
