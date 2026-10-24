@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { shrinkImage } from '../lib/image.js'
+import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
 
 const QUICK = [
   { room: '164', label: 'Room 164 · Closing Ceremony' },
@@ -9,14 +9,21 @@ const QUICK = [
 export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto }) {
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
+  const [hint, setHint] = useState('')
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setBusy(true)
+    setHint('')
     try {
-      const blob = await shrinkImage(file)
+      const { blob, sharpness } = await shrinkImage(file)
+      // On-phone blur/blank check: don't upload a photo that can't match.
+      if (sharpness < BLUR_THRESHOLD) {
+        setHint('That looked blurry or blank. Step back and point down the hallway or at a room number.')
+        return
+      }
       onPhoto({ blob, url: URL.createObjectURL(blob) })
     } finally {
       setBusy(false)
@@ -71,6 +78,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
           className="flex w-full items-center justify-center gap-3 rounded-3xl bg-scarlet py-5 font-display text-xl font-bold text-white shadow-[0_10px_30px_-10px_rgba(204,0,0,.6)] active:scale-[.98] disabled:opacity-50">
           <CameraIcon /> {busy ? 'Preparing…' : 'Snap the hallway'}
         </button>
+        {hint && <p className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
         <p className="mt-3 text-center text-xs text-muted">No GPS, no tracking. Your photo is deleted after matching.</p>
       </div>
     </main>

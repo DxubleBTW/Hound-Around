@@ -14,13 +14,13 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
   const votes = Math.round((loc.confidence || 0) * 10)
 
   async function pick(spot) {
-    if (spot === loc.spot) return onConfirm(spot, false)
+    if (spot === loc.spot) return onConfirm(spot, null)
     setSaving(spot)
     try {
-      await correct(loc.photo_id, spot)
-      onConfirm(spot, true)
+      const res = await correct(loc.photo_id, spot)
+      onConfirm(spot, res?.index_size ?? true) // surface the new index size in the toast
     } catch {
-      onConfirm(spot, false) // still route them; the correction just didn't save
+      onConfirm(spot, null) // still route them; the correction just didn't save
     }
   }
 
@@ -51,8 +51,12 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
               <span key={i} className={`h-2 flex-1 rounded-full ${i < votes ? 'bg-scarlet' : 'bg-line'}`} />
             ))}
           </div>
-          {loc.ocr_room && <p className="mt-3 text-sm text-muted">Also read a sign: Room {loc.ocr_room}</p>}
+          {loc.ocr_room && <p className="mt-3 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>}
         </div>
+      )}
+
+      {picking && loc.ocr_room && (
+        <p className="mt-4 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>
       )}
 
       {picking && (
