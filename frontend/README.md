@@ -16,6 +16,26 @@ Mock locate alternates between a confident match and an unsure one, so both demo
 
 To use the real backend, copy `.env.example` to `.env.local` and set `VITE_API_URL` to the Space URL.
 
+### Connect a local checkout to the existing live service
+
+The current backend URL and its verified state are in [docs/STATUS.md](../docs/STATUS.md).
+For local development, put the following in **ignored** `frontend/.env.local`, replacing
+the placeholder with that backend URL. Preserve any existing local settings:
+
+```dotenv
+VITE_API_URL=/api
+API_PROXY_TARGET=<backend URL from docs/STATUS.md>
+```
+
+Run `npm run dev` from `frontend/`. Vite forwards `/api/*` to the live service, so the
+browser can run the full UI without downloading private data or ML models locally.
+Health and directions use the real service; confirming a correction changes its live
+index. Use verified CDS photos and location labels when testing corrections.
+
+The `/api` proxy is for development only. A production build needs `VITE_API_URL` set
+to the direct backend URL; Vercel must have that value in its own environment and be
+redeployed. See [the deployment handoff](../docs/handoff-vercel-backend.md).
+
 ## Error handling and checks
 
 Requests time out after eight seconds and are cancelled when leaving a screen.
@@ -29,7 +49,8 @@ says it could not confirm the save rather than claiming nothing was learned. An 
 or already-used photo ID requires another photo to try learning again.
 
 Photo preparation failures return to capture with an error instead of uploading an empty
-blob. Dark/blurry-image detection is still separate follow-up work.
+blob. A client-side Laplacian check also rejects blurry/blank photos; its threshold
+still needs checking on real phones and hallway photos.
 
 ```bash
 cd frontend
@@ -62,7 +83,7 @@ Add `VITE_API_URL` under Environment Variables, then redeploy (Vite bakes it in 
 |---|---|
 | `Snap` | Destination ("Where to?"), Elevators-only toggle, big camera button. Shrinks the photo to 512 px and strips EXIF before upload. |
 | `Locating` | Shows the photo while `POST /locate` runs. Eight-second timeout, retry, and cancellation on retake. |
-| `Confirm` | Spot + floor + "9/10 frames agree". "Right spot?" → yes routes, no opens the top-3 picker. Picker opens automatically when confidence < 0.6 or the top 3 span floors (contract rule). Picking a different spot calls `POST /correct`; only a confirmed save shows "just learned from you". Failures offer retry or navigation without a confirmed save. |
+| `Confirm` | Spot + floor + match strength. The score includes nearby-spot support and is not a calibrated accuracy percentage. "Right spot?" → yes routes, no opens the top-3 picker. Picker opens automatically when confidence < 0.6 or the top 3 span floors. Picking a different spot calls `POST /correct`; only a confirmed save shows the learning message. Failures offer retry or navigation without a confirmed save. |
 | `Route` | `GET /route`, one step at a time (ethics rule: no full map, only the next turn). Route failures offer retry or restart. |
 
 ## Rules this code follows
