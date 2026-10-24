@@ -62,15 +62,27 @@ These were in the repo before Kiro and are **not** Kiro's work:
 - **Agent hooks** under `.kiro/hooks/` (see "Hooks" below).
 - **This `KIRO.md`.**
 
-### Planned (later tasks)
+### Done in this wave
 
-- The `ml/` package: `embedder.py`, `ocr.py`, `index.py`, `build_index.py`,
-  `backend.py`, `eval.py`, with synthetic-only tests.
-- Eval structure (metrics, experiments table, learning curve).
-- Frontend finishing (real API wiring, loading/error/empty states, Laplacian
-  blur check, turn icons, floor-change card, accessibility).
-- Property-based tests (e.g. the one-correction-flip).
-- Deployment notes (HF Space + private data) and submission docs.
+- The `ml/` package: `embedder.py` (DINOv2-small CLS embedder), `ocr.py`,
+  `index.py`, `build_index.py`, `backend.py` (the `create_backend` factory
+  matching the handoff), and `eval.py` (splits, metrics, go/no-go, leakage
+  guard), all with synthetic-only tests that run under `python -m pytest -q`.
+- Frontend finishing: real API wiring, loading/error/empty states, the
+  Laplacian blur check, turn icons, the floor-change card, and accessibility.
+- Deployment architecture documented (HF Space + private HF dataset repo via
+  `HF_TOKEN`, `.dockerignore` extended to carry `ml/`, env vars, the
+  rate-limit-behind-proxy fix, corrections-reset-on-restart) in design §6–§7
+  and the README. The Dockerfile dependency install, build-time model download,
+  real index, HF/Vercel account steps, and curl proofs are human-blocked (they
+  need approval of `torch`/`easyocr`/`huggingface_hub` plus network and
+  accounts) and are surfaced as asks, not performed.
+
+### Still pending
+
+- **Property-based tests** (the one-correction-flip) are **pending approval of
+  the `hypothesis` dependency**. They have NOT run yet and have not caught
+  anything; nothing here claims otherwise.
 
 ## Hooks (what each automates)
 
@@ -87,12 +99,55 @@ of truth.
 | `privacy-guard-on-stop` | agent stops | run `git status --porcelain`, warn about any private file (data/, images/videos, graph/rooms/labels/anchors/nodes, `*.npz`, `*.sqlite`, `.env`, tokens), never stage them, and confirm `git check-ignore .kiro/` prints nothing |
 | `frontend-build` | save of `frontend/src/**` | run `npm run build` in `frontend/` and report errors |
 
-## Running log — fill in as work proceeds
+## Spec structure and spec-driven vs vibe coding
 
-- **Which hooks automated what:** _TBD — note real runs, e.g. a pytest failure
-  caught on save or a contract mismatch flagged._
-- **Which steering mattered most:** _TBD._
-- **What the property tests caught:** _TBD (e.g. the one-correction-flip)._
-- **MCP / Kiro powers used:** _TBD._
-- **What a person changed by hand** (vs what Kiro generated): _TBD — record
-  human edits here to keep the account honest._
+The spec in `.kiro/specs/hound-around-completion/` follows Kiro's
+**requirements → design → tasks** flow:
+
+- `requirements.md` — the workstreams (A–G) as acceptance-style requirements,
+  grounded in `docs/contract.md` and the existing code.
+- `design.md` — the technical decisions (DINOv2 CLS vs mean pooling, top-10
+  voting and the one-correction-flip, OCR gating, routing wording
+  reconciliation, the HF Space + private-data deployment, the rate-limit proxy
+  fix, the new-dependency table, and the testing strategy), with every proposed
+  change kept in Open Questions until the team approves it.
+- `tasks.md` — the ordered, proof-ending tasks (P1–P3) that implement the
+  design.
+
+Spec-driven work differed from vibe coding in a way that mattered for a public
+repo with a strict contract: because the contract, the privacy rules, and the
+dependency budget were written down first, each change had a clear boundary and
+a proof command, and nothing drifted into renaming contract fields, committing
+private data, or adding unapproved packages. Vibe coding would have been faster
+to start but would not have kept those non-negotiables visible on every change.
+
+## Running log
+
+- **Which hooks automated what:** the four hooks (`tests-on-save`,
+  `contract-guard`, `privacy-guard-on-stop`, `frontend-build`) are defined under
+  `.kiro/hooks/` with the triggers/actions in the table above. `tests-on-save`
+  runs `python -m pytest -q` on Python saves, `frontend-build` runs
+  `npm run build` on frontend saves, `contract-guard` flags contract-field
+  mismatches, and `privacy-guard-on-stop` checks `git status` for private files
+  and confirms `.kiro/` is not ignored. They encode the proof commands this
+  project requires after every change.
+- **Which steering mattered most:** `hound-rules.md` (always included) carried
+  the non-negotiable rules as a per-change checklist and was the one that most
+  shaped behavior — it kept `.gitignore` and `docs/contract.md` untouched and
+  kept private data out. `api.md` (the contract-enforcement invariants and ML
+  handoff interface) and `ml.md` mattered most while building the `ml/` package;
+  `frontend.md` guided the frontend finishing; `structure.md`/`tech.md` fixed
+  the layout and proof commands.
+- **What the property tests caught:** nothing yet. The property-based tests
+  (the one-correction-flip) are **pending approval of the `hypothesis`
+  dependency** and have not run. No claim is made that they caught anything.
+- **MCP / Kiro powers used:** none. No MCP servers and no Kiro powers were used
+  for this work; it was done with the file, search, shell, and git tooling only.
+- **What a person changed by hand** (vs what Kiro generated): the pre-existing
+  `api/`, `pipeline/`, first `frontend/`, `docs/`, `tests/`, `Dockerfile`,
+  `.dockerignore` base, `.gitignore`, `requirements*.txt`, and README files were
+  built earlier with other tools. The human-blocked steps below are left for a
+  person: approving and installing the ML dependencies, extending the Dockerfile
+  deps and running `docker build`, creating the HF Space + private dataset repo
+  + `HF_TOKEN` secret, setting `VITE_API_URL` in Vercel and redeploying, running
+  the curl proofs against the deployed Space, and the end-to-end phone demo.
