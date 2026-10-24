@@ -118,7 +118,12 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             if factory and stub_spot:
                 raise ValueError('Choose a real ML factory or an explicit stub, not both')
             if factory:
-                state['matcher'] = load_backend(factory, data_dir)
+                try:
+                    state['matcher'] = load_backend(factory, data_dir)
+                except (OSError, ValueError) as error:
+                    # e.g. index.npz not fetched yet: stay up and report 503
+                    # rather than crash or answer with invented locations.
+                    logger.error('Recognition backend unavailable: %s', error)
             elif stub_spot:
                 state['matcher'] = StubBackend(state['router'].nodes[stub_spot])
         data_dir.mkdir(parents=True, exist_ok=True)

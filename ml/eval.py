@@ -65,11 +65,10 @@ VALID_FLOORS = (-1, 1, 2)
 def build_distance_graph(graph: dict) -> nx.Graph:
     """Undirected weighted graph for shortest-path *distance* between spots.
 
-    Mirrors ``api/routing.py``: edge weight is ``cost`` when present else
-    ``meters``; edges are walkable both ways unless ``one_way``. Unlike the
-    router we keep every edge (no accessible/verify filtering): graph-distance
-    error measures how far apart two spots are in the building, not a
-    navigable route for a specific user.
+    Edge weight is physical ``meters``. Every edge counts both ways, including
+    ``verify`` and ``one_way`` ones the router may skip: graph-distance error
+    measures how far apart two spots are in the building, not a navigable
+    route for a specific user.
     """
     distance = nx.Graph()
     for node in graph.get('nodes', []):
@@ -78,8 +77,9 @@ def build_distance_graph(graph: dict) -> nx.Graph:
         a, b = edge.get('from'), edge.get('to')
         if a is None or b is None:
             continue
-        meters = float(edge.get('meters', 0.0))
-        weight = float(edge.get('cost', meters))
+        # Physical meters only: `cost` is a routing penalty (an elevator is 0 m
+        # with cost 30), so it must not show up as localization error (N10).
+        weight = float(edge.get('meters', 0.0))
         # Keep the smallest weight if a pair is connected more than once.
         if distance.has_edge(a, b):
             weight = min(weight, distance[a][b]['weight'])
@@ -115,8 +115,7 @@ def top1_accuracy(predictions) -> float:
     """
     if not predictions:
         return 0.0
-    hits = sum(1 for p in predictions if _topk_spots(p, 1) and _topk_spots(p, 1)[0] == p['true'])
-    return hits / len(predictions)
+    return sum(1 for p in predictions if _is_correct(p)) / len(predictions)
 
 
 def topk_accuracy(predictions, k: int = 3) -> float:
@@ -141,8 +140,7 @@ def floor_accuracy(predictions, node_floor: dict) -> float:
         true_floor = node_floor.get(p['true'])
         pred_floor = p.get('floor')
         if pred_floor is None:
-            top = _topk_spots(p, 1)
-            pred_floor = node_floor.get(top[0]) if top else None
+            pred_floor = node_floor.get(_predicted(p))
         if pred_floor is not None and true_floor is not None and pred_floor == true_floor:
             hits += 1
     return hits / len(predictions)
@@ -158,8 +156,7 @@ def median_graph_distance_error(predictions, distance: nx.Graph) -> float:
         return 0.0
     errors = []
     for p in predictions:
-        top = _topk_spots(p, 1)
-        predicted = top[0] if top else None
+        predicted = _predicted(p)
         errors.append(graph_distance(distance, predicted, p['true']) if predicted is not None
                       else float('inf'))
     return float(statistics.median(errors))
@@ -215,8 +212,7 @@ def confusion_pairs(predictions, limit: int = 10):
     """
     tally: dict[tuple, int] = {}
     for p in predictions:
-        top = _topk_spots(p, 1)
-        predicted = top[0] if top else None
+        predicted = _predicted(p)
         if predicted is not None and predicted != p['true']:
             key = (p['true'], predicted)
             tally[key] = tally.get(key, 0) + 1
@@ -250,9 +246,17 @@ def _topk_spots(prediction, k):
     return [v['spot'] for v in prediction.get('top3', [])[:k]]
 
 
-def _is_correct(prediction):
+def _predicted(prediction):
+    """The spot the app actually uses: ``spot`` when recorded (it can differ from
+    ``top3[0]`` after an OCR override, review N08), else the top vote."""
+    if prediction.get('spot') is not None:
+        return prediction['spot']
     top = _topk_spots(prediction, 1)
-    return bool(top) and top[0] == prediction['true']
+    return top[0] if top else None
+
+
+def _is_correct(prediction):
+    return _predicted(prediction) == prediction['true']
 
 
 def _percentile(sorted_values, pct):
@@ -278,6 +282,21 @@ def read_labels(labels_csv: Path):
         for row in csv.DictReader(handle):
             if row.get('status') == 'keep':
                 rows.append(row)
+    return rows
+
+
+def read_all_labels(data_dir):
+    """``keep`` rows from every pipeline manifest, each with its frame ``_path``
+    (review N05; same discovery as ml.build_index and ml.backend)."""
+    from ml.backend import manifest_paths
+
+    data_dir = Path(data_dir)
+    rows = []
+    for manifest in manifest_paths(data_dir):
+        train_dir = data_dir / 'dataset' / 'train' if manifest.parent == data_dir else manifest.parent / 'train'
+        for row in read_labels(manifest):
+            row['_path'] = train_dir / row['label'] / row['file']
+            rows.append(row)
     return rows
 
 
@@ -389,7 +408,7 @@ def evaluate_split(data_dir, split: str, backend, graph: dict, limit=None):
     from PIL import Image  # local import keeps module import light
 
     data_dir = Path(data_dir)
-    rows = read_labels(data_dir / 'labels.csv')
+    rows = read_all_labels(data_dir)
     train_rows, val_rows, _ = split_train_val(rows)
 
     if split == 'test':
@@ -416,6 +435,7 @@ def evaluate_split(data_dir, split: str, backend, graph: dict, limit=None):
             latencies.append((time.perf_counter() - start) * 1000.0)
         predictions.append({
             'true': item['true'],
+            'spot': result.get('spot'),
             'top3': result.get('top3', []),
             'confidence': result.get('confidence', 0.0),
             'floor': result.get('floor'),
@@ -424,7 +444,7 @@ def evaluate_split(data_dir, split: str, backend, graph: dict, limit=None):
 
 
 def _row_item(data_dir, row, subdir):
-    path = Path(data_dir) / 'dataset' / subdir / row['label'] / row['file']
+    path = row.get('_path') or Path(data_dir) / 'dataset' / subdir / row['label'] / row['file']
     return {'path': path, 'true': row['label'], 'video': row.get('video')}
 
 
@@ -456,11 +476,16 @@ def _pct(value):
 
 
 def go_no_go_line(predictions) -> str:
-    """The 3 PM go/no-go verdict: >= 7/10 top-1 correct (requirements C.3)."""
+    """The 3 PM go/no-go verdict: at least 10 photos and >= 70% top-1 correct.
+
+    The rate matters, not the count: 7/100 is a NO-GO (review N09), and fewer
+    than 10 photos is not enough evidence to pass.
+    """
     correct = sum(1 for p in predictions if _is_correct(p))
     n = len(predictions)
-    verdict = 'GO' if correct >= GO_NO_GO_MIN and n >= 1 else 'NO-GO'
-    target = f'(target: >= {GO_NO_GO_MIN}/{GO_NO_GO_N})'
+    ok = n >= GO_NO_GO_N and correct * GO_NO_GO_N >= GO_NO_GO_MIN * n
+    verdict = 'GO' if ok else 'NO-GO'
+    target = f'(target: >= {GO_NO_GO_MIN}/{GO_NO_GO_N} on at least {GO_NO_GO_N} photos)'
     return f'Go/no-go: {correct}/{n} correct {target} -> {verdict}'
 
 
@@ -579,7 +604,13 @@ def main(argv=None):
 
     # Default: evaluate one split and print the metrics table + go/no-go.
     graph = _load_graph(data_dir)
-    backend = _build_real_backend(data_dir)
+    exclude = ()
+    if args.split == 'val':
+        # The deployed index holds every video. Scoring held-out runs against it
+        # would score frames it already contains (review N01), so val gets its
+        # own index built without them.
+        _, _, exclude = split_train_val(read_all_labels(data_dir))
+    backend = _build_real_backend(data_dir, exclude_videos=exclude)
     predictions, latencies = evaluate_split(data_dir, args.split, backend, graph,
                                              limit=args.limit)
     metrics = compute_metrics(predictions, graph, latencies)
@@ -594,15 +625,31 @@ def main(argv=None):
     return 0
 
 
-def _build_real_backend(data_dir):
+def _build_real_backend(data_dir, exclude_videos=()):
     """Construct the shipped backend (lazily imports torch via DINOv2).
 
-    Human-blocked in the sandbox: needs approved torch/transformers deps and the
-    private index/graph. Kept out of module import so ``--help`` works without
-    them.
+    With ``exclude_videos`` it builds a separate evaluation index without those
+    videos (never overwriting the deployed ``index.npz``) and asserts none of
+    their frames went in. Kept out of module import so ``--help`` works without
+    the heavy deps.
     """
     from ml.backend import create_backend  # local: backend itself is light
-    return create_backend(data_dir)
+    if not exclude_videos:
+        return create_backend(data_dir)
+    import tempfile
+
+    from ml.build_index import build_index, keep_frames
+    from ml.embedder import Dinov2Embedder
+
+    held = {f for frames in keep_frames(data_dir).values() for f in frames} - \
+        {f for frames in keep_frames(data_dir, exclude_videos).values() for f in frames}
+    embedder = Dinov2Embedder()
+    eval_index = Path(tempfile.mkdtemp()) / 'index_eval.npz'
+    build_index(data_dir, embed_fn=embedder, exclude_videos=exclude_videos, out_path=eval_index)
+    if not held:
+        raise LeakageError('Held-out videos contributed no frames; check the split')
+    print(f'Evaluation index excludes {len(held)} frames from {sorted(exclude_videos)}')
+    return create_backend(data_dir, embedder=embedder, index_path=eval_index)
 
 
 if __name__ == '__main__':  # pragma: no cover - CLI

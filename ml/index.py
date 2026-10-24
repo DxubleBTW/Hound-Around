@@ -76,23 +76,35 @@ class VectorIndex:
                            labels=list(self.labels), source=list(self.source))
 
     # -- retrieval / voting ----------------------------------------------
-    def vote(self, query, k=10):
+    def vote(self, query, k=10, mask=None):
         """Top-k weighted vote for a normalized query vector.
 
         Returns ``(ranked, neighbors)`` where ``ranked`` is a list of
         ``{'spot', 'votes', 'sim'}`` sorted by votes desc then summed
         similarity desc, and ``neighbors`` is a list of ``(label, source,
         sim)`` for the top-k rows (used for OCR floor override).
+        ``mask`` (bool ``[N]``) restricts the vote to those rows, e.g. one
+        floor after OCR reads a room sign.
         """
         query = normalize(np.asarray(query, dtype=np.float32).reshape(-1))
-        if len(self) == 0:
+        rows = np.arange(len(self)) if mask is None else np.flatnonzero(mask)
+        if len(rows) == 0:
             return [], []
-        sims = self.vecs @ query  # vectors already normalized -> cosine.
-        k = min(k, len(self))
-        # Highest similarities first.
-        top = np.argsort(-sims, kind='stable')[:k]
-        neighbors = [(self.labels[i], self.source[i], float(sims[i])) for i in top]
-        tally: dict[str, dict] = {}
+        sims = self.vecs[rows] @ query  # vectors already normalized -> cosine.
+        k = min(k, len(rows))
+        # Highest similarities first; on equal similarity a correction sorts
+        # ahead of video rows, so a corrected copy of a frame that many video
+        # rows duplicate is never pushed out of the top k (review N02).
+        is_video = np.array([self.source[i] != 'correction' for i in rows])
+        top = rows[np.lexsort((is_video, -sims))[:k]]
+        sims = self.vecs[top] @ query
+        neighbors = [(self.labels[i], self.source[i], float(s)) for i, s in zip(top, sims)]
+        # A person-labeled view that is the query's single nearest neighbor
+        # takes precedence over the video vote. A similarity threshold can't
+        # gate this: on real frames, 10% of photos of other spots reach 0.90
+        # with some frame, while half of same-view retakes fall below it.
+        precedence = neighbors[0][0] if neighbors[0][1] == 'correction' else None
+        tally: dict = {}
         for label, source, sim in neighbors:
             weight = CORRECTION_WEIGHT if source == 'correction' else 1
             bucket = tally.setdefault(
@@ -101,8 +113,11 @@ class VectorIndex:
             bucket['sim'] += sim
             if source == 'correction':
                 bucket['corrected'] = True
-        # Votes desc; ties break toward a correction (design §3), then by
-        # summed similarity (steering ml.md step 4).
+        # Nearest-neighbor correction first, then votes desc; ties break toward
+        # a correction (design §3), then by summed similarity (steering ml.md
+        # step 4). Confidence stays votes/k, so one correction usually leads
+        # the top-3 picker rather than claiming certainty.
         ranked = sorted(tally.values(),
-                        key=lambda b: (b['votes'], b['corrected'], b['sim']), reverse=True)
+                        key=lambda b: (b['spot'] == precedence, b['votes'], b['corrected'], b['sim']),
+                        reverse=True)
         return ranked, neighbors

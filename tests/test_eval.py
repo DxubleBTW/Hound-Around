@@ -61,14 +61,15 @@ def pred(true, ranked, confidence=1.0, floor=None):
     return out
 
 
-# --- graph distance (cost else meters, same as routing) ------------------
+# --- graph distance (physical meters) -------------------------------------
 
-def test_graph_distance_uses_cost_then_meters():
+def test_graph_distance_is_meters_not_routing_cost():
     distance = build_distance_graph(eval_graph())
-    # a->b uses cost=2 (not meters=5); b->c uses meters=3.
-    assert graph_distance(distance, 'F1_a', 'F1_b') == pytest.approx(2.0)
+    # a->b is 5 m even though its routing cost is 2: cost is a penalty, not
+    # distance, so it must never be reported as meters of error (review N10).
+    assert graph_distance(distance, 'F1_a', 'F1_b') == pytest.approx(5.0)
     assert graph_distance(distance, 'F1_b', 'F1_c') == pytest.approx(3.0)
-    assert graph_distance(distance, 'F1_a', 'F1_c') == pytest.approx(5.0)
+    assert graph_distance(distance, 'F1_a', 'F1_c') == pytest.approx(8.0)
     assert graph_distance(distance, 'F1_a', 'F1_a') == 0.0
 
 
@@ -254,3 +255,25 @@ def test_leakage_guard_raises_when_train_and_val_share_a_video():
     val = [{'label': 'F1_a', 'video': 'F1_run1', 'file': 'b.jpg'}]  # same video!
     with pytest.raises(LeakageError, match='share video run'):
         assert_no_leakage(train, val, [])
+
+
+# --- review regressions (N08, N09) ----------------------------------------
+
+def test_go_no_go_needs_rate_and_sample_size():
+    # N09: 7/100 used to print GO.
+    hit, miss = pred('F1_a', ['F1_a']), pred('F1_b', ['F1_a'])
+    assert 'NO-GO' not in go_no_go_line([hit] * 7 + [miss] * 3)
+    assert 'NO-GO' in go_no_go_line([hit] * 6 + [miss] * 4)
+    assert 'NO-GO' in go_no_go_line([hit] * 7 + [miss] * 93)
+    assert 'NO-GO' in go_no_go_line([hit] * 7)  # fewer than 10 photos
+    assert 'NO-GO' not in go_no_go_line([hit] * 14 + [miss] * 6)
+
+
+def test_metrics_score_the_final_spot_not_top3_head():
+    # N08: after an OCR override the app's spot can differ from top3[0].
+    fixed = pred('F2_x', ['F1_a', 'F2_x'])
+    fixed['spot'] = 'F2_x'
+    broken = pred('F1_a', ['F1_a', 'F2_x'])
+    broken['spot'] = 'F2_x'
+    assert top1_accuracy([fixed]) == 1.0
+    assert top1_accuracy([broken]) == 0.0

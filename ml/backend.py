@@ -13,6 +13,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import networkx as nx
 import numpy as np
 
 from ml.embedder import DIM, MODEL_NAME, as_embed_fn
@@ -21,6 +22,12 @@ from ml.index import VectorIndex
 TOP_K = 10
 # When the vote is this uncertain, OCR may help (design.md §4 / steering).
 OCR_CONFIDENCE_GATE = 0.8
+# Votes for spots within this many walking meters of the winner (same floor)
+# count toward its confidence. Look-alike neighbors (F2's east corridor) split
+# the vote, yet the route starts in the same place. On real footage, leave-one-
+# video-out, this cut picker prompts from 82% to 62% of photos while user
+# success rose 55% -> 57% (ml/research/floor_report.py).
+NEIGHBORHOOD_M = 8
 
 
 class Backend:
@@ -41,15 +48,24 @@ class Backend:
         self._ocr = ocr_reader
         self._model_name = model_name
         self.top_k = top_k
-        # node id -> floor, and adjacency, from graph.json.
+        # node id -> floor, and adjacency, from graph.json. Same edge rules as
+        # api/routing.py: verify=true edges are skipped there, so a heading
+        # across one would fail the API's graph check (review N06).
         self._floor = {n['id']: n['floor'] for n in graph.get('nodes', [])}
         self._neighbors: dict[str, set] = {n['id']: set() for n in graph.get('nodes', [])}
+        walk = nx.Graph()
         for edge in graph.get('edges', []):
             a, b = edge.get('from'), edge.get('to')
-            if a in self._neighbors and b in self._neighbors:
+            if a in self._neighbors and b in self._neighbors and not edge.get('verify', False):
                 self._neighbors[a].add(b)
                 if not edge.get('one_way', False):
                     self._neighbors[b].add(a)
+                if not edge.get('vertical', False):
+                    walk.add_edge(a, b, weight=float(edge.get('meters', 0)))
+        # spot -> spots within NEIGHBORHOOD_M walking meters on the same floor.
+        self._nearby = {
+            n: set(nx.single_source_dijkstra_path_length(walk, n, cutoff=NEIGHBORHOOD_M, weight='weight'))
+            for n in walk.nodes}
         # label -> most common labels.csv heading (design.md §3 / steering §6).
         self._heading = headings
 
@@ -65,20 +81,13 @@ class Backend:
     def locate(self, image) -> dict:
         # Embed, then drop the image reference immediately (never retained).
         vector = np.asarray(self._embed(image), dtype=np.float32).reshape(-1)
-        ranked, neighbors = self.index.vote(vector, k=self.top_k)
-        if not ranked:
-            # Empty index: return a valid-but-zero-confidence placeholder.
-            spot = next(iter(self._floor), None)
-            floor = self._floor.get(spot, 1) if spot else 1
-            return self._result(vector, spot, floor, 0.0,
-                                [{'spot': spot, 'votes': 0}] if spot else [], None, None)
-
-        winner = ranked[0]
-        spot = winner['spot']
-        votes = winner['votes']
-        confidence = min(1.0, votes / self.top_k)
-        top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
+        if len(self.index) == 0:
+            # Never invent a location (review N07); the API turns this into an error.
+            raise RuntimeError('Recognition index is empty')
+        ranked, _ = self.index.vote(vector, k=self.top_k)
+        spot = ranked[0]['spot']
         floor = self._floor.get(spot, 1)
+        confidence = self._confidence(ranked)
 
         # OCR gate: only when uncertain or the top3 span multiple floors.
         floors_in_top3 = {self._floor.get(r['spot']) for r in ranked[:3]}
@@ -86,10 +95,16 @@ class Backend:
         if self._ocr is not None and (confidence < OCR_CONFIDENCE_GATE or len(floors_in_top3) > 1):
             ocr_room, ocr_floor = self._ocr(image)
             if ocr_floor is not None and ocr_floor != floor:
-                # OCR floor wins: best-voted neighbor on that floor, lower conf.
-                spot, floor, confidence = self._apply_floor_override(
-                    ranked, neighbors, ocr_floor, spot, floor, confidence)
+                # The sign's floor wins: re-vote over that floor's rows only, so
+                # the returned spot is top3[0] and the picker can offer it
+                # (review N03).
+                mask = np.array([self._floor.get(l) == ocr_floor for l in self.index.labels])
+                if mask.any():
+                    ranked, _ = self.index.vote(vector, k=self.top_k, mask=mask)
+                    spot, floor = ranked[0]['spot'], ocr_floor
+                    confidence = self._confidence(ranked)
 
+        top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
         return self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
 
     def prepare_correction(self, vector, label) -> VectorIndex:
@@ -108,19 +123,13 @@ class Backend:
         self.index = snapshot.copy()
 
     # -- helpers ----------------------------------------------------------
-    def _apply_floor_override(self, ranked, neighbors, ocr_floor, spot, floor, confidence):
-        """Pick best-voted spot on the OCR floor; confidence = its votes/k."""
-        on_floor = [r for r in ranked if self._floor.get(r['spot']) == ocr_floor]
-        if on_floor:
-            best = on_floor[0]  # ranked is already votes-desc, sim-desc.
-            spot = best['spot']
-            floor = ocr_floor
-            # Reseat confidence on the override winner's honest vote fraction so
-            # the returned number stays a true votes/k (design.md §4). A
-            # floor-conflict override means the winner's votes are already low,
-            # so the resulting confidence still trips the Confirm.jsx picker.
-            confidence = min(1.0, best['votes'] / self.top_k)
-        return spot, floor, confidence
+    def _confidence(self, ranked):
+        """Winner's votes plus votes for spots within NEIGHBORHOOD_M of it, / k."""
+        winner = ranked[0]['spot']
+        floor = self._floor.get(winner)
+        near = {s for s in self._nearby.get(winner, ()) if self._floor.get(s) == floor}
+        votes = sum(r['votes'] for r in ranked if r['spot'] == winner or r['spot'] in near)
+        return min(1.0, votes / self.top_k)
 
     def _choose_heading(self, spot):
         """Most common labels.csv heading for the spot, if a graph neighbor."""
@@ -144,6 +153,20 @@ class Backend:
         }
 
 
+def manifest_paths(data_dir: Path) -> list:
+    """Every labels.csv the pipeline produced (review N05).
+
+    ``pipeline/label_frames.py --out data/<dataset>`` writes
+    ``data/<dataset>/labels.csv`` with frames in ``data/<dataset>/train/``; one
+    dataset per filming batch. A top-level ``data/labels.csv`` (frames in
+    ``data/dataset/train``) is still accepted.
+    """
+    data_dir = Path(data_dir)
+    found = sorted(p for p in data_dir.glob('*/labels.csv') if (p.parent / 'train').is_dir())
+    legacy = data_dir / 'labels.csv'
+    return ([legacy] if legacy.exists() else []) + found
+
+
 def load_headings(labels_csv: Path) -> dict:
     """Most common ``heading`` per label among keep rows of labels.csv."""
     counts: dict[str, Counter] = {}
@@ -161,7 +184,7 @@ def load_headings(labels_csv: Path) -> dict:
     return {label: counter.most_common(1)[0][0] for label, counter in counts.items()}
 
 
-def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K):
+def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K, index_path=None):
     """Factory called once at startup with ``data_dir`` (pathlib.Path).
 
     By default loads ``index.npz``/``graph.json``/``labels.csv`` from
@@ -172,13 +195,21 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K)
     """
     data_dir = Path(data_dir)
 
-    index_path = data_dir / 'index.npz'
-    index = VectorIndex.load(index_path) if index_path.exists() else VectorIndex()
+    # Fail closed (review N07): without a usable index the API must not start
+    # and report ready while answering with invented locations.
+    index_path = Path(index_path) if index_path else data_dir / 'index.npz'
+    if not index_path.exists():
+        raise FileNotFoundError(f'{index_path} is missing; build it with python -m ml.build_index')
+    index = VectorIndex.load(index_path)
+    if len(index) == 0:
+        raise ValueError(f'{index_path} has no vectors')
 
     graph_path = data_dir / 'graph.json'
     graph = json.loads(graph_path.read_text()) if graph_path.exists() else {'nodes': [], 'edges': []}
 
-    headings = load_headings(data_dir / 'labels.csv')
+    headings = {}
+    for manifest in manifest_paths(data_dir):
+        headings.update(load_headings(manifest))
 
     embed_fn = _resolve_embedder(embedder)
     reader = _resolve_ocr(ocr_reader)

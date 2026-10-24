@@ -1,7 +1,8 @@
 """Build ``data/index.npz`` from ``labels.csv`` (status==keep) + frames.
 
-Reads ``<data_dir>/labels.csv`` rows with ``status == keep`` and their frames
-under ``<data_dir>/dataset/train/<spot>/``, embeds them, and writes
+Reads every ``<data_dir>/<dataset>/labels.csv`` the pipeline wrote (frames in
+``<data_dir>/<dataset>/train/<spot>/``; a top-level ``<data_dir>/labels.csv``
+pairs with ``<data_dir>/dataset/train``), keeps ``status == keep``, embeds, and writes
 ``<data_dir>/index.npz`` in the contract format:
 
 - ``vecs`` float16 ``[N, 384]`` (L2-normalized)
@@ -83,7 +84,29 @@ def _as_float(value):
         return 0.0
 
 
-def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT):
+def keep_frames(data_dir, exclude_videos=()):
+    """spot -> ordered frame paths across every pipeline manifest (review N05).
+
+    Each ``data/<dataset>/labels.csv`` pairs with ``data/<dataset>/train``; a
+    top-level ``data/labels.csv`` pairs with ``data/dataset/train``.
+    ``exclude_videos`` keeps held-out videos out of an evaluation index
+    (review N01).
+    """
+    from ml.backend import manifest_paths
+
+    data_dir = Path(data_dir)
+    by_spot: dict = {}
+    for manifest in manifest_paths(data_dir):
+        train_dir = data_dir / 'dataset' / 'train' if manifest.parent == data_dir else manifest.parent / 'train'
+        with open(manifest, newline='') as handle:
+            skip = {r['file'] for r in csv.DictReader(handle) if r.get('video') in set(exclude_videos)}
+        for spot, files in read_keep_rows(manifest).items():
+            by_spot.setdefault(spot, []).extend(
+                train_dir / spot / f for f in files if f not in skip and (train_dir / spot / f).exists())
+    return by_spot
+
+
+def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None):
     """Build and return ``(VectorIndex-like arrays)`` and write ``index.npz``.
 
     Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed.
@@ -97,18 +120,16 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT):
         from ml.embedder import Dinov2Embedder  # lazy heavy import
         embed_fn = Dinov2Embedder()
 
-    by_spot = read_keep_rows(data_dir / 'labels.csv')
-    train_dir = data_dir / 'dataset' / 'train'
+    by_spot = keep_frames(data_dir, exclude_videos)
 
     vecs_parts, labels, counts = [], [], {}
     for spot in sorted(by_spot):
         if spot not in valid_nodes:
             continue
-        frames = [f for f in by_spot[spot] if (train_dir / spot / f).exists()]
-        frames = even_sample(frames, cap)
+        frames = even_sample(by_spot[spot], cap)
         if not frames:
             continue
-        images = [Image.open(train_dir / spot / f).convert('RGB') for f in frames]
+        images = [Image.open(f).convert('RGB') for f in frames]
         try:
             vectors = np.asarray(embed_fn(images), dtype=np.float32).reshape(-1, DIM)
         finally:
@@ -124,7 +145,7 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT):
         else np.zeros((0,), dtype='U1')
     labels_arr = np.asarray(labels, dtype='U') if labels else np.zeros((0,), dtype='U1')
 
-    out_path = data_dir / 'index.npz'
+    out_path = Path(out_path) if out_path else data_dir / 'index.npz'
     np.savez(out_path, vecs=vecs, labels=labels_arr, source=source)
 
     _report(counts)

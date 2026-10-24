@@ -306,17 +306,20 @@ def test_vote_result_invariants(rows, q_seed, top_k):
 
     top3 = result['top3']
     assert 1 <= len(top3) <= 3
-    # votes descending.
+    # votes descending, except that a correction which is the query's nearest
+    # neighbor may lead with fewer votes (ml/index.py, review N02).
     votes = [t['votes'] for t in top3]
-    assert votes == sorted(votes, reverse=True)
+    assert votes[1:] == sorted(votes[1:], reverse=True)
     # unique spots in top3.
     assert len({t['spot'] for t in top3}) == len(top3)
     # spot == top3[0].spot.
     assert result['spot'] == top3[0]['spot']
 
-    # Non-override path: confidence == winning_votes / top_k (capped at 1).
+    # Non-override path: confidence is the winner's votes plus same-floor spots
+    # within NEIGHBORHOOD_M of it, / top_k (capped at 1), never less than the
+    # winner's own share.
     winning_votes = top3[0]['votes']
-    assert result['confidence'] == pytest.approx(min(1.0, winning_votes / top_k))
+    assert result['confidence'] >= min(1.0, winning_votes / top_k) - 1e-9
 
     # Returned floor matches the winning spot's node floor.
     assert result['floor'] == VOTE_SPOTS[result['spot']]

@@ -105,15 +105,36 @@ def test_locate_contract_shape():
     assert np.isfinite(vector).all() and np.linalg.norm(vector) > 0
 
 
+def far_graph():
+    """synthetic_graph() with F1_a and F1_b 30 m apart (no neighborhood pooling)."""
+    graph = synthetic_graph()
+    graph['edges'][0] = {'from': 'F1_a', 'to': 'F1_b', 'meters': 30}
+    return graph
+
+
 def test_confidence_math():
     red = (255, 0, 0)
-    # 7 red->F1_a out of top_k=10 -> confidence 0.7.
+    # 7 red->F1_a out of top_k=10 -> confidence 0.7 when F1_b is far away.
     rows = [(red, 'F1_a', 'video')] * 7 + [((0, 128, 0), 'F1_b', 'video')] * 5
-    backend = build(make_index(rows), top_k=10)
+    backend = build(make_index(rows), graph=far_graph(), top_k=10)
     result = backend.locate(solid(red))
     assert result['spot'] == 'F1_a'
     assert result['top3'][0]['votes'] == 7
     assert result['confidence'] == pytest.approx(0.7)
+
+
+def test_confidence_pools_votes_from_nearby_spots():
+    red = (255, 0, 0)
+    # F1_b is 1 m from F1_a on the same floor: its 3 votes say "same place".
+    rows = [(red, 'F1_a', 'video')] * 7 + [((0, 128, 0), 'F1_b', 'video')] * 5
+    result = build(make_index(rows), top_k=10).locate(solid(red))
+    assert result['spot'] == 'F1_a'
+    assert result['top3'][0]['votes'] == 7  # votes stay honest per spot
+    assert result['confidence'] == pytest.approx(1.0)
+    # F2_c is 1 m from F1_b in the graph but on another floor: never pooled.
+    rows = [(red, 'F1_b', 'video')] * 6 + [((0, 0, 255), 'F2_c', 'video')] * 4
+    result = build(make_index(rows), top_k=10).locate(solid(red))
+    assert result['confidence'] == pytest.approx(0.6)
 
 
 def test_top3_ordering_and_similarity_tiebreak():
@@ -317,6 +338,7 @@ def test_create_app_with_backend(tmp_path, monkeypatch):
 
     red = (255, 0, 0)
     index = make_index([(red, 'F1_a', 'video')] * 8 + [((0, 0, 255), 'F2_c', 'video')] * 2)
+    index.save(tmp_path / 'index.npz')  # create_backend refuses to start without one
 
     def factory(directory):
         # Inject the fake embedder and a no-op OCR reader: no torch/easyocr.
@@ -340,3 +362,113 @@ def test_create_app_with_backend(tmp_path, monkeypatch):
                              'top3', 'ocr_room', 'ocr_floor', 'ms'}
         assert body['spot'] == 'F1_a'
         assert body['floor'] == 1
+
+
+# --- review regressions (docs: Hound-Around-Kiro-Recheck, N02-N07) ---------
+
+def test_correction_flips_query_despite_ten_identical_video_frames():
+    # N02: ten identical video exemplars used to push an equally similar
+    # correction out of the top k, so the correction never voted.
+    red = (255, 0, 0)
+    backend = build(make_index([(red, 'F1_a', 'video')] * 10))
+    backend.apply_correction(backend.prepare_correction(COLOR_VEC[red], 'F1_b'))
+    assert backend.locate(solid(red))['spot'] == 'F1_b'
+
+
+def test_correction_does_not_hijack_unrelated_query():
+    red, blue = (255, 0, 0), (0, 0, 255)
+    backend = build(make_index([(red, 'F1_a', 'video')] * 5 + [(blue, 'F2_c', 'video')] * 5))
+    backend.apply_correction(backend.prepare_correction(COLOR_VEC[red], 'F1_b'))
+    assert backend.locate(solid(blue))['spot'] == 'F2_c'
+
+
+def test_ocr_override_from_rank_four_is_selectable():
+    # N03: OCR picked a 4th-ranked spot that was missing from top3.
+    graph = {'nodes': [{'id': s, 'floor': f} for s, f in
+                       (('F1_a', 1), ('F1_b', 1), ('F1_c', 1), ('F2_d', 2))], 'edges': []}
+    red = (255, 0, 0)
+    vec = COLOR_VEC[red]
+    near = [normalize(vec + 0.05 * basis(10 + i)) for i in range(10)]
+    labels = ['F1_a'] * 4 + ['F1_b'] * 3 + ['F1_c'] * 2 + ['F2_d']
+    index = VectorIndex(np.stack(near), labels, ['video'] * 10)
+    backend = Backend(index, graph, {}, FakeEmbedder(), ocr_reader=lambda im: ('248', 2))
+    result = backend.locate(solid(red))
+    assert result['spot'] == 'F2_d' and result['floor'] == 2
+    assert result['top3'][0]['spot'] == 'F2_d'
+
+
+def test_ocr_parses_basement_rooms_and_floor_signs():
+    # N04: B62 and "Floor 2" used to parse as nothing.
+    from ml.ocr import parse_sign
+    assert parse_sign('B62') == ('B62', -1)
+    assert parse_sign('b64a') == ('B64A', -1)
+    assert parse_sign('164') == ('164', 1)
+    assert parse_sign('248') == ('248', 2)
+    assert parse_sign('Floor 2') == (None, 2)
+    assert parse_sign('Lower Level') == (None, -1)
+    assert parse_sign('48') == (None, None)        # seat counts are not rooms
+    assert parse_sign('665 Comm Ave') == (None, None)
+    assert parse_sign('Floor 3') == (None, None)   # out of scope
+
+
+def test_heading_never_crosses_unverified_edge():
+    # N06: the API's router drops verify=true edges, so such a heading 500s.
+    graph = synthetic_graph()
+    graph['edges'][0]['verify'] = True
+    red = (255, 0, 0)
+    backend = build(make_index([(red, 'F1_a', 'video')] * 3), graph=graph,
+                    headings={'F1_a': 'F1_b'})
+    assert backend.locate(solid(red))['heading'] is None
+
+
+def test_create_backend_fails_closed_without_index(tmp_path):
+    # N07: a missing or empty index used to answer with an invented location.
+    (tmp_path / 'graph.json').write_text(json.dumps(synthetic_graph()))
+    with pytest.raises(FileNotFoundError):
+        create_backend(tmp_path, embedder=FakeEmbedder(), ocr_reader=lambda im: (None, None))
+    VectorIndex().save(tmp_path / 'index.npz')
+    with pytest.raises(ValueError):
+        create_backend(tmp_path, embedder=FakeEmbedder(), ocr_reader=lambda im: (None, None))
+
+
+def test_build_index_reads_pipeline_dataset_folders(tmp_path):
+    # N05: label_frames.py writes data/<dataset>/labels.csv; the builder only
+    # read data/labels.csv. Also: excluded videos never reach an eval index (N01).
+    (tmp_path / 'graph.json').write_text(json.dumps(synthetic_graph()))
+    header = 'file,video,t_sec,label,label_source,in_graph,sharpness,dup_of_prev,status'
+    for ds, video, spot, color in (('dataset', 'v1', 'F1_a', (255, 0, 0)),
+                                   ('dataset_f2', 'v2', 'F2_c', (0, 0, 255))):
+        _ensure(tmp_path / ds / 'train' / spot)
+        lines = [header]
+        for i in range(3):
+            name = f'{spot}_{i}.jpg'
+            solid(color).save(tmp_path / ds / 'train' / spot / name)
+            lines.append(f'{name},{video},{i}.0,{spot},voice,true,1800,false,keep')
+        (tmp_path / ds / 'labels.csv').write_text('\n'.join(lines) + '\n')
+    from ml.build_index import build_index
+    _, counts = build_index(tmp_path, embed_fn=FakeEmbedder())
+    assert counts == {'F1_a': 3, 'F2_c': 3}
+    _, counts = build_index(tmp_path, embed_fn=FakeEmbedder(), exclude_videos={'v2'},
+                            out_path=tmp_path / 'eval.npz')
+    assert counts == {'F1_a': 3}
+
+
+def test_app_reports_unready_when_index_missing(tmp_path, monkeypatch):
+    # N07 end to end: no index -> /health 503 and /locate 503, never a guess.
+    import sys
+    from types import SimpleNamespace
+    from api.main import create_app
+
+    (tmp_path / 'graph.json').write_text(json.dumps(synthetic_graph()))
+    (tmp_path / 'rooms.json').write_text('[]')
+
+    def factory(directory):
+        return create_backend(directory, embedder=FakeEmbedder(), ocr_reader=lambda im: (None, None))
+
+    monkeypatch.setitem(sys.modules, 'synthetic_ml_missing', SimpleNamespace(create_backend=factory))
+    monkeypatch.setenv('HOUND_ML_FACTORY', 'synthetic_ml_missing:create_backend')
+    monkeypatch.delenv('HOUND_STUB_SPOT', raising=False)
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.get('/health').status_code == 503
+        response = client.post('/locate', files={'image': ('q.jpg', _jpeg((255, 0, 0)), 'image/jpeg')})
+        assert response.status_code == 503
