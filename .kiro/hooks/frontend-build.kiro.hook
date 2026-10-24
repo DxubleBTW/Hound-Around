@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Frontend build",
+  "description": "When a file in frontend/src is saved, run npm run build in frontend/ and report errors.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "frontend/src/**"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "command": "cd frontend && npm run build",
+    "prompt": "A file under frontend/src was saved. Run `npm run build` inside the frontend/ directory. If the build succeeds, say so in one line. If it fails, report the build errors concisely: the file, line, and message, and the most likely fix given the file that changed. Keep changes surgical; do not refactor working frontend code unless the build requires it. Do not stage or commit anything."
+  }
+}

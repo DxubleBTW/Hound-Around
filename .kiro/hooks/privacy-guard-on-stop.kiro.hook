@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Privacy guard (on stop)",
+  "description": "When the agent stops, run git status --porcelain and warn about any private file staged or present. Never stage data/, images/videos, private data files, indexes, databases, env files, or tokens. Confirm .kiro is not ignored.",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "command": "git status --porcelain",
+    "prompt": "The agent is stopping. Run `git status --porcelain` and inspect the result. WARN LOUDLY (and never stage) if any of the following appear as staged or untracked-about-to-be-added: anything under data/; any image or video (*.jpg, *.jpeg, *.heic, *.mov, *.MOV, *.mp4, or any *.png OUTSIDE docs/img/); graph.json, rooms.json, labels.csv, anchors.json, nodes.txt; *.npz; *.sqlite; .env or .env.* (except .env.example); or anything that looks like a token or secret. These must never be committed to this public repo. If any are present, tell the user exactly which files and that they must stay out of the commit, and do NOT stage them. Then run `git check-ignore .kiro/` and confirm it prints NOTHING (exit non-zero) — report that .kiro/ is correctly NOT ignored. Never modify .gitignore and never add .kiro/ to it. Do not commit anything yourself."
+  }
+}

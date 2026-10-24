@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "name": "Tests on save",
+  "description": "When a Python file in api/, ml/, or tests/ is saved, run the pytest suite and summarize failures.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "api/**/*.py",
+      "ml/**/*.py",
+      "tests/**/*.py"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "command": "python -m pytest -q",
+    "prompt": "A Python file in api/, ml/, or tests/ was just saved. Run `python -m pytest -q` from the repository root and report the result. If all tests pass, say so in one line. If any fail, summarize each failure concisely: the failing test name, the assertion or error, and the most likely cause given the file that changed. Do not modify docs/contract.md. Do not stage or commit anything. Tests use synthetic data only; never introduce building photos or files under data/."
+  }
+}
