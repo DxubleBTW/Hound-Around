@@ -1,0 +1,39 @@
+# Building data never goes in the repo: frames, videos, floor plans, walk sheets, test photos
+data/
+*.mov
+*.MOV
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.pdf
+!docs/img/*.png
+
+# Large artifacts (index ships to the Space separately)
+*.npz
+*.sqlite
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.vercel/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
