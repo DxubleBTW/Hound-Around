@@ -2,20 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { correct } from '../api.js'
 import { floorName, floorOf, spotName } from '../lib/spots.js'
 
-// Three confidence bands over the contract's existing fields (confidence =
-// winning_votes/10; no backend relevance score exists yet — see note below):
-//   confidence <  MIN_RELEVANCE          -> irrelevant: the photo matches nowhere
-//                                            in the building, so ask for a retake.
-//   MIN_RELEVANCE <= confidence < PICKER  -> uncertain: show the top-3 picker.
-//   confidence >= PICKER (and one floor)  -> confident: route directly.
-//
-// Rationale: a photo of a random object / person / outdoors will not cluster near
-// any indexed hallway, so the winning spot gets very few of the 10 votes. 0.2 means
-// the top candidate won <= 2/10 votes.
-//
-// Open question for the team/contract: a dedicated backend distance/relevance score
-// (e.g. embedding distance to the nearest indexed frame) would be far more robust
-// than inferring relevance from vote share. That is a contract change, not for this PR.
+// Preserve the existing very-low-confidence retake fallback. Vote agreement
+// measures uncertainty, not whether the photo belongs to the building. Actual
+// unrelated-photo rejection is performed by the calibrated backend similarity
+// guard and handled by Locating's 422 recovery path.
 const MIN_RELEVANCE = 0.2
 const PICKER_THRESHOLD = 0.6
 
@@ -30,7 +20,7 @@ function needsPicker(loc) {
   return loc.confidence < PICKER_THRESHOLD || floors.size > 1
 }
 
-export default function Confirm({ photo, loc, onConfirm, onRetake }) {
+export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building' }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
@@ -41,7 +31,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
 
   useEffect(() => () => pending.current?.abort(), [])
 
-  // Irrelevant photo: don't route, don't show the picker — ask for a better shot.
+  // Extremely uncertain answer: preserve the retake fallback and offer manual routing.
   if (isIrrelevant(loc)) {
     return (
       <main className="rise flex flex-1 flex-col justify-center text-center">
@@ -52,7 +42,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
         </div>
         <h2 className="mt-6 font-display text-3xl font-extrabold leading-tight">Hmm — I can’t tell<br />where this is.</h2>
         <p className="mt-3 text-muted">
-          Point your camera down a hallway or at a room-number sign, and make sure you’re inside the CDS building.
+          Point your camera down a hallway or at a room-number sign, and make sure you’re inside {buildingLabel}.
         </p>
         <button
           onClick={onRetake}
@@ -60,6 +50,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
         >
           Take another photo
         </button>
+        <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
       </main>
     )
   }
@@ -72,7 +63,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
     setFailure(null)
     setSaving(spot)
     try {
-      const res = await correct(loc.photo_id, spot, { signal: controller.signal })
+      const res = await (api?.correct || correct)(loc.photo_id, spot, { signal: controller.signal })
       // Surface the new index size so the toast can read "N frames indexed".
       if (!controller.signal.aborted) onConfirm(spot, res?.index_size ?? true)
     } catch (error) {
@@ -173,6 +164,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
           <p className="text-center text-sm text-muted">Your pick teaches the app this spot for next time.</p>
         )}
         <button onClick={onRetake} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
+        <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
       </div>
     </main>
   )

@@ -56,6 +56,19 @@ GET /health    → {"ok":true,"index_size":2213,"model":"dinov2-small"}
 
 Confidence = winning votes / 10. Below ~0.6, or when the top 3 span floors, the app shows the top-3 picker. `ocr_room` / `ocr_floor` are null when nothing is read.
 
+### Unrecognized-photo error
+
+When a validated similarity cutoff is configured, `/locate` can reject an unrelated
+photo with HTTP 422 and the following error body. Successful response fields are unchanged:
+
+```json
+{"detail":{"code":"unrecognized_location","message":"Location not recognized. Take another hallway photo or choose a starting location."}}
+```
+
+The client uses the known code to offer retake/manual routing. It does not render
+arbitrary server error text. Rejection does not issue `photo_id` or add a correction.
+See [feature setup](navigation-features-proposal.md) for cutoff calibration and activation.
+
 ## index.npz and corrections.sqlite
 
 ```

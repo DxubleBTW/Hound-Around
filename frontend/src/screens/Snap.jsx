@@ -1,20 +1,29 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
-import { ALL_DESTS, DEST_GROUPS, resolveDestination } from '../lib/destinations.js'
+import { ALL_DESTS, resolveDestination } from '../lib/destinations.js'
 
-export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto }) {
+export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto, onManual, destinations = ALL_DESTS, destinationGroups, resolvePlace = resolveDestination }) {
+  const groups = destinationGroups || [{ title: 'Destinations', items: destinations }]
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState('')
+  const active = useRef(true)
+  const preparation = useRef(0)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false; preparation.current += 1 }
+  }, [])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const request = ++preparation.current
     setHint('')
     setBusy(true)
     try {
       const blob = await shrinkImage(file)
+      if (!active.current || request !== preparation.current) return
       // On-phone blur/blank check: don't upload a photo that can't match.
       if (typeof blob.sharpness === 'number' && blob.sharpness < BLUR_THRESHOLD) {
         setHint('That looked blurry or blank. Step back and point down the hallway or at a room number.')
@@ -22,9 +31,9 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
       }
       onPhoto({ blob, url: URL.createObjectURL(blob) })
     } catch (err) {
-      setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
+      if (active.current && request === preparation.current) setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
     } finally {
-      setBusy(false)
+      if (active.current && request === preparation.current) setBusy(false)
     }
   }
 
@@ -48,33 +57,33 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
           <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
           <input
             id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-            onBlur={(e) => { const r = resolveDestination(e.target.value); if (r !== e.target.value) setDest(r) }}
+            onBlur={(e) => { const r = resolvePlace(e.target.value); if (r !== e.target.value) setDest(r) }}
             list="dest-suggestions"
-            placeholder="Room number or place, e.g. 164 or floor 1 bathroom"
+            placeholder={destinations[0]?.value ? `Room number or place, e.g. ${destinations[0].value}` : 'Room number or place'}
             className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
             autoComplete="off" inputMode="text"
             aria-describedby="dest-hint"
           />
           {/* Suggestions are drawn ONLY from the verified set so nothing implies rooms we can't route to. */}
           <datalist id="dest-suggestions">
-            {ALL_DESTS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+            {destinations.map((d) => <option key={d.value} value={d.value}>{d.label || d.name}</option>)}
           </datalist>
-          <p id="dest-hint" className="text-xs text-muted">Type a room number, a node, or a place like “floor 2 restroom”.</p>
+          <p id="dest-hint" className="text-xs text-muted">Type a room number or choose one of this building’s suggestions.</p>
         </div>
 
         {/* Grouped quick-picks: a tidy, scrollable chip set from verified-real destinations only. */}
         <div className="space-y-3">
-          {DEST_GROUPS.map((group) => (
+          {groups.map((group) => (
             <div key={group.title}>
               <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</p>
               <div className="flex flex-wrap gap-2">
                 {group.items.map((q) => {
-                  const active = resolveDestination(dest) === q.value
+                  const active = resolvePlace(dest) === q.value
                   return (
                     <button key={q.value} type="button" onClick={() => setDest(q.value)}
                       aria-pressed={active}
                       className={`min-h-[44px] rounded-full border px-3.5 py-2 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${active ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted hover:border-scarlet/40'}`}>
-                      {q.label}
+                      {q.label || q.name}
                     </button>
                   )
                 })}
@@ -104,6 +113,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
           <span className="relative">{busy ? 'Preparing…' : 'Snap the hallway'}</span>
         </button>
         {hint && <p role="alert" className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
+        <button onClick={onManual} disabled={busy || !dest.trim()} className="min-h-[44px] w-full py-3 font-semibold text-muted disabled:opacity-50">Choose my starting room instead</button>
         <p className="mt-3 text-center text-xs text-muted">No GPS, no tracking. Your photo is deleted after matching.</p>
       </div>
     </main>

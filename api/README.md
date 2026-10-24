@@ -81,19 +81,29 @@ parser's spool threshold is above the entire body cap. Photos remain in RAM.
 Only normalized vectors are cached. SQLite stores the contract correction
 log at `HOUND_DATA_DIR/corrections.sqlite`.
 
-Corrections update the **in-memory** index immediately and log to SQLite.
-They do not overwrite index.npz. Restarting reloads ML's base index, so the
-SQLite log alone cannot replay learned vectors. Use one Uvicorn worker:
-multiple workers would have independent caches and indexes.
+Corrections update the live index immediately and persist normalized vectors,
+metadata, and versions in SQLite. On restart, compatible corrections replay onto
+the original base index; index.npz is not overwritten. Set `HOUND_STATE_DIR` to a
+private persistent volume and a unique `HOUND_DATASET_ID` per building. Ephemeral
+hosting storage still disappears when replaced. Use one Uvicorn worker because
+multiple workers would have independent caches and live indexes.
 
 A local operator embedding the app in a trusted Python process may call
 `app.state.rollback_last_correction()` to restore the preceding index,
 remove that correction's log row, invalidate outstanding cached vectors,
-and increment the in-memory version. `app.state.index_version()` reads the
-version. Only the latest correction can be rolled back. This adds no public
-endpoint and provides no remote admin UI. Versions and rollback snapshots
-last for this process only. Rollback removes its log entry; this is a demo
-log, not an immutable audit trail.
+and increment the persisted version. `app.state.index_version()` reads the
+version. The latest compatible correction can be rolled back, including after
+restart; its snapshot is reconstructed during replay. This adds no public
+endpoint and provides no remote admin UI. Rollback removes the corresponding
+vector and log entry; this is not an immutable audit trail. Old audit rows that
+have no vector cannot be replayed. A different model/base index/graph gets its
+own correction context rather than inheriting another dataset's labels.
+
+See [navigation feature setup](../docs/navigation-features-proposal.md) for
+similarity-based rejection, calibration, public campus metadata, persistent
+state migration, and deployment checks. The optional rejection cutoff must be
+validated and configured before unrelated-photo rejection is active. It returns
+the documented 422 error code and never issues a photo ID for rejected inputs.
 
 ## Smoke checks
 

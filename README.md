@@ -6,6 +6,13 @@ DS+X / Hackachusetts project, built at BU Spark! DS+X 2026 (College Hack track).
 
 Live app: [https://www.hound-around.tech](https://www.hound-around.tech)
 
+Navigation reliability features and rollout requirements are documented in
+[feature setup](docs/navigation-features-proposal.md): manual starting-room selection,
+public destination suggestions, configured school/building selection, optional
+calibrated photo rejection, persistent correction vectors, and automated checks.
+Actual detection thresholds, persistent hosting storage, additional school data,
+and deployment settings still require operator setup and real-data verification.
+
 ## The problem
 
 Indoor navigation apps that rely on GPS fall apart inside large buildings: GPS does not work indoors, Wi-Fi positioning needs infrastructure we do not control, and floor plans alone do not tell you where you are *right now*. Visitors to the CDS building (665 Comm Ave) regularly get lost between look-alike floors. Hound Around solves this using only a single photo, with no GPS, no Wi-Fi positioning, and no tracking.
@@ -61,7 +68,13 @@ On Windows use `.venv\Scripts\python.exe`. Supply private `data/graph.json` and 
 
 ### ML (`ml/`)
 
-The ML package (`ml/embedder.py`, `ml/ocr.py`, `ml/index.py`, `ml/build_index.py`, `ml/backend.py`, `ml/eval.py`) needs model dependencies that are **not** in `requirements.txt` and **require team approval** before install: `torch` (CPU wheels, ~200 MB), `transformers` with `facebook/dinov2-small` (~85 MB weights), and `easyocr` with its models (~90 MB lib + ~100 MB models). `CLIP ViT-B/32` (~350 MB) is used only for the eval baseline and is never shipped. See the dependency table in [`.kiro/specs/hound-around-completion/design.md`](.kiro/specs/hound-around-completion/design.md) §8.
+The approved model runtime dependencies are in `requirements.txt`: CPU `torch`/`torchvision`,
+`transformers` with `facebook/dinov2-small`, EasyOCR, and Hugging Face Hub. The Dockerfile
+installs them and downloads weights at build time. `requirements-dev.txt` now installs
+only the shared API and test dependencies from `requirements-core.txt`, so tests/CI
+do not download the models. Install the full runtime separately when running real
+recognition locally. CLIP and chart dependencies remain experiments-only in
+`requirements-experiments.txt` and are not shipped.
 
 Once those are approved and installed, with private frames and `labels.csv` in place:
 
@@ -102,7 +115,12 @@ The following Dockerfile and Space changes are gated on approval of the ML depen
 
 **Rate limit behind the HF proxy.** The backend caps POSTs at 30/min per peer IP. Behind the HF proxy every request arrives from the proxy IP, so all judges would share one bucket. The fix (design §7) is to run Uvicorn with `--proxy-headers` and a trusted-hosts allowlist so the real client IP is resolved for the HF proxy only (never trusting arbitrary forwarded headers), and to raise the limit for the demo window as a safety net. This must be tested against the deployed Space.
 
-**Corrections reset on restart.** Corrections live in memory plus a SQLite log on the Space's temporary disk; they reset when the Space restarts, which is acceptable for the demo (design §6, `api/README.md`).
+**Corrections need persistent storage.** The API can now replay compatible correction
+vectors and versions from SQLite after restart. Set `HOUND_STATE_DIR` to a private
+persistent volume and use a unique `HOUND_DATASET_ID` per building. The default
+temporary Space filesystem still loses that database when it is replaced. Base
+index/model/graph changes isolate old corrections for review; they are not silently
+applied to a new mapping package. See the feature setup guide before deploying.
 
 ## Repo layout
 

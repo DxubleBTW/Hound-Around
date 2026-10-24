@@ -18,6 +18,8 @@ import numpy as np
 
 from ml.embedder import DIM, MODEL_NAME, as_embed_fn
 from ml.index import VectorIndex
+from ml.errors import UnrecognizedLocation
+from ml.rejection import load_threshold, threshold_value
 
 TOP_K = 10
 # When the vote is this uncertain, OCR may help (design.md §4 / steering).
@@ -42,12 +44,13 @@ class Backend:
 
     def __init__(self, index: VectorIndex, graph: dict, headings: dict,
                  embed_fn, ocr_reader=None, model_name: str = MODEL_NAME,
-                 top_k: int = TOP_K):
+                 top_k: int = TOP_K, min_similarity=None):
         self.index = index
         self._embed = embed_fn
         self._ocr = ocr_reader
         self._model_name = model_name
         self.top_k = top_k
+        self.min_similarity = None if min_similarity is None else threshold_value(min_similarity)
         # node id -> floor, and adjacency, from graph.json. Same edge rules as
         # api/routing.py: verify=true edges are skipped there, so a heading
         # across one would fail the API's graph check (review N06).
@@ -84,7 +87,14 @@ class Backend:
         if len(self.index) == 0:
             # Never invent a location (review N07); the API turns this into an error.
             raise RuntimeError('Recognition index is empty')
-        ranked, _ = self.index.vote(vector, k=self.top_k)
+        ranked, neighbors = self.index.vote(vector, k=self.top_k)
+        # Vote agreement is not evidence that a photo belongs to this building:
+        # even an unrelated image has ten nearest neighbors. Gate by similarity
+        # before OCR or location voting can turn it into a confident answer.
+        if self.min_similarity is not None and (
+                not neighbors or not np.isfinite(neighbors[0][2])
+                or neighbors[0][2] < self.min_similarity):
+            raise UnrecognizedLocation('Location not recognized')
         spot = ranked[0]['spot']
         floor = self._floor.get(spot, 1)
         confidence = self._confidence(ranked)
@@ -216,7 +226,8 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
 
     model_name = getattr(embedder, 'model_name', MODEL_NAME) if embedder is not None else MODEL_NAME
     return Backend(index, graph, headings, embed_fn, ocr_reader=reader,
-                   model_name=model_name, top_k=top_k)
+                   model_name=model_name, top_k=top_k,
+                   min_similarity=load_threshold(data_dir, index_path, model_name))
 
 
 def _resolve_embedder(embedder):

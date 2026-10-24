@@ -1,10 +1,11 @@
 // Keep network failures readable without exposing raw server/proxy responses.
 export class ApiError extends Error {
-  constructor(message, { status = null, retryable = false } = {}) {
+  constructor(message, { status = null, retryable = false, code = null } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.retryable = retryable
+    this.code = code
   }
 }
 
@@ -48,7 +49,17 @@ export async function requestJson(url, {
   }, timeoutMs)
   try {
     const response = await fetch(url, { ...options, signal: controller.signal })
-    if (!response.ok) throw responseError(response.status, operation)
+    if (!response.ok) {
+      if (response.status === 422 && operation === 'locate') {
+        const body = await response.json().catch(() => null)
+        if (body?.detail?.code === 'unrecognized_location') {
+          throw new ApiError('We do not recognize this spot. Point down a hallway in the selected building and take another photo, or choose your starting location.', {
+            status: 422, code: 'unrecognized_location',
+          })
+        }
+      }
+      throw responseError(response.status, operation)
+    }
     try {
       const data = await response.json()
       if (controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError')

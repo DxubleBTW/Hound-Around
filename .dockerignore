@@ -1,5 +1,6 @@
 **
 !requirements.txt
+!requirements-core.txt
 !api/
 !api/*.py
 !ml/

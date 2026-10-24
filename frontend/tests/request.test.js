@@ -144,3 +144,16 @@ test('mock responses are cancelled when leaving a screen', async () => {
   controller.abort()
   await assert.rejects(request, { name: 'AbortError' })
 })
+
+test('unrelated-photo response offers retake rather than pretending the image is malformed', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    detail: { code: 'unrecognized_location', message: 'untrusted server text' },
+  }, { status: 422 }))
+  await assert.rejects(requestJson('/locate', { operation: 'locate' }), (error) => {
+    assert.equal(error.code, 'unrecognized_location')
+    assert.equal(error.status, 422)
+    assert.match(error.message, /take another photo/)
+    assert.doesNotMatch(error.message, /untrusted server text/)
+    return true
+  })
+})

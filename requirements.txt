@@ -1,11 +1,4 @@
-fastapi>=0.115,<1
-# Multipart spool_max_size and max_part_size are required for memory-only uploads.
-starlette>=0.47,<2
-uvicorn[standard]>=0.30,<1
-python-multipart>=0.0.18,<1
-pillow>=11,<14
-numpy>=2,<3
-networkx>=3,<4
+-r requirements-core.txt
 # Runtime recognition deps (ship to the HF Space). Imported lazily by ml/* so
 # the test suite stays green without them installed. The Dockerfile installs the
 # CPU-only torch build via --index-url https://download.pytorch.org/whl/cpu.

@@ -51,7 +51,7 @@ function floorBadge(instruction = '') {
   return token
 }
 
-export default function Route({ from, heading, dest, accessible, onRestart }) {
+export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -59,7 +59,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const [attempt, setAttempt] = useState(0)
   // Resolve typed phrases ("floor 1 bathroom") to a value the backend understands.
   // Unknown values pass through untouched and the backend 422s them (handled below).
-  const resolvedDest = resolveDestination(dest)
+  const resolvedDest = resolvePlace(dest)
   const requestKey = JSON.stringify([from, resolvedDest, accessible, heading])
   const data = response?.key === requestKey ? response.data : null
   const reduced = prefersReducedMotion()
@@ -77,7 +77,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
     setI(0)
     setDir('fwd')
     const to = resolvedDest
-    const run = (opts) => route(opts, { signal: controller.signal })
+    const run = (opts) => (api?.route || route)(opts, { signal: controller.signal })
 
     run({ from, to, accessible, heading })
       .catch((e) => {
@@ -93,13 +93,13 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
         } else if (e?.status === 422) {
           // Unknown room / node. There is no /spots endpoint to autocomplete from,
           // so guide the user to a valid value instead of faking a list.
-          setError({ key: requestKey, unknownDest: true, message: `We don’t know a room or place called “${dest.trim()}”. Try a room number like 164, or pick one when you snap again.` })
+          setError({ key: requestKey, unknownDest: true, message: 'We could not resolve the starting location or destination. Check both room numbers or choose a listed place.' })
         } else {
           setError({ key: requestKey, message: e?.message || 'Couldn’t plan that route. Try again.' })
         }
       })
     return () => { live = false; controller.abort() }
-  }, [from, resolvedDest, accessible, heading, requestKey, attempt])
+  }, [from, resolvedDest, accessible, heading, requestKey, attempt, api])
 
   // Short vibration on each step change, where supported and motion is allowed.
   useEffect(() => { if (data) tick(15) }, [i, data])
@@ -181,7 +181,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
       <section className="mt-4 rounded-2xl border border-line bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <p className="min-w-0 text-sm text-muted">
-            <span className="font-medium text-ink">{spotName(from)}</span>
+            <span className="font-medium text-ink">{spotName(from) || from}</span>
             <span className="mx-1.5" aria-hidden>→</span>
             <span className="font-medium text-ink">{destText}</span>
           </p>
