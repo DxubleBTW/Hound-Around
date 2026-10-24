@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
 import Route from './screens/Route.jsx'
-import { MOCK } from './api.js'
+import { MOCK, health } from './api.js'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
 function initialDest() {
@@ -22,7 +22,29 @@ export default function App() {
   const [here, setHere] = useState(null) // confirmed spot
   const [toast, setToast] = useState('')
 
+  // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
+  const [server, setServer] = useState(MOCK ? 'ok' : 'checking')
+  const [model, setModel] = useState('')
+
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2600) }
+
+  // Hugging Face Spaces sleep when idle; the first request wakes them. Poll /health until ready (max ~2 min).
+  useEffect(() => {
+    if (MOCK) return
+    let live = true
+    let timer
+    let tries = 0
+    const check = async () => {
+      const h = await health()
+      if (!live) return
+      setModel(h.model)
+      if (h.ok) return setServer('ok')
+      setServer(h.reachable ? 'waking' : 'down')
+      if (++tries < 24) timer = setTimeout(check, 5000)
+    }
+    check()
+    return () => { live = false; clearTimeout(timer) }
+  }, [])
 
   const restart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url) // drop the local preview; nothing is kept
@@ -34,6 +56,18 @@ export default function App() {
       {MOCK && (
         <div className="mb-2 self-center rounded-full bg-ink/5 px-3 py-1 text-[11px] font-medium text-muted">
           Demo data · backend not connected
+        </div>
+      )}
+      {!MOCK && server !== 'ok' && (
+        <div role="status" className="mb-2 self-center rounded-full bg-ink/5 px-3 py-1 text-[11px] font-medium text-muted">
+          {server === 'checking' && 'Connecting to Hound Around…'}
+          {server === 'waking' && 'Server waking up, about 30 s…'}
+          {server === 'down' && 'Can’t reach the server right now'}
+        </div>
+      )}
+      {!MOCK && server === 'ok' && model.startsWith('stub') && (
+        <div className="mb-2 self-center rounded-full bg-scarlet/10 px-3 py-1 text-[11px] font-medium text-scarlet">
+          Test backend · not real recognition
         </div>
       )}
 

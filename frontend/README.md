@@ -14,7 +14,31 @@ npm run dev          # http://localhost:5173 , also on your LAN IP so you can op
 With no `VITE_API_URL` set, the app runs on **mock data** (a "Demo data" pill shows at the top).
 Mock locate alternates between a confident match and an unsure one, so both demo paths are visible.
 
-To use the real backend, copy `.env.example` to `.env.local` and set `VITE_API_URL` to the Space URL.
+## Connect the real backend
+
+Copy `.env.example` to `.env.local`, then pick one:
+
+**Backend on your laptop** (also works from a phone on the same Wi-Fi, no CORS setup):
+```bash
+# terminal 1, repo root (needs private data/graph.json + rooms.json, and HOUND_ML_FACTORY or HOUND_STUB_SPOT)
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1
+# frontend/.env.local
+VITE_API_URL=/api
+API_PROXY_TARGET=http://127.0.0.1:8000
+# terminal 2
+cd frontend && npm run dev
+```
+Vite forwards `/api/*` to uvicorn, so the browser only ever talks to Vite.
+
+**Deployed Space:** `VITE_API_URL=https://<user>-<space>.hf.space` (the direct `.hf.space` host, not the
+huggingface.co/spaces page). The Space must allow this site's origin in `HOUND_CORS_ORIGINS`; the Dockerfile
+default allows `https://www.hound-around.tech`, `https://hound-around.tech`, `https://hound-around-theta.vercel.app` and `http://localhost:5173`.
+Vercel preview URLs are not covered (the backend rejects wildcards); add one explicitly if you need it.
+
+**Server status pill.** On load the app polls `GET /health` every 5 s (up to 2 min) and shows
+"Connecting… / Server waking up… / Can’t reach the server" until the backend is ready, since a sleeping
+Space wakes on that first request. If `/health` reports a `stub-*` model, a red "Test backend · not real
+recognition" pill stays up so nobody mistakes the stub for real recognition.
 
 ## Error handling and checks
 

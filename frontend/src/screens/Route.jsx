@@ -69,7 +69,8 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const arrived = i >= steps.length
   const step = steps[i]
   const kind = step ? stepKind(step.instruction) : null
-  const remaining = steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0)
+  // The backend reports real meters as floats (e.g. 12.345); show whole meters.
+  const remaining = Math.round(steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0))
   const mins = Math.max(1, Math.round((data.est_seconds * (remaining / (data.total_meters || 1))) / 60))
   const riseClass = reduced ? '' : 'rise'
 
@@ -115,7 +116,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
             <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
           </div>
           <p className="mt-3 font-display text-4xl font-extrabold leading-[1.08] tracking-tight">{step.instruction}</p>
-          {step.meters > 0 && <p className="mt-4 text-lg text-muted">about {step.meters} m</p>}
+          {step.meters > 0 && <p className="mt-4 text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
           <p className="mt-8 text-sm text-muted">{remaining} m left · ~{mins} min</p>
         </section>
       ) : (

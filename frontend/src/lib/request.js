@@ -108,3 +108,24 @@ export function delay(ms, value, signal) {
     signal?.addEventListener('abort', cancel, { once: true })
   })
 }
+
+// GET /health → {ok, index_size, model}. The backend answers 503 with the same body while the model loads,
+// so this never throws: `reachable` separates "waking up" from "can't connect".
+export async function checkHealth(url, { timeoutMs = 15000 } = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    const body = await response.json().catch(() => ({}))
+    return {
+      ok: response.ok && body?.ok === true,
+      reachable: true,
+      index_size: Number.isInteger(body?.index_size) ? body.index_size : 0,
+      model: typeof body?.model === 'string' ? body.model : '',
+    }
+  } catch {
+    return { ok: false, reachable: false, index_size: 0, model: '' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
