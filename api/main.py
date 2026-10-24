@@ -24,8 +24,10 @@ from python_multipart.exceptions import MultipartParseError
 from starlette.concurrency import run_in_threadpool
 from starlette.formparsers import MultiPartException, MultiPartParser
 
+from api.corrections import CorrectionStore, index_context
 from api.recognition import StubBackend, load_backend
 from api.routing import Router
+from ml.errors import UnrecognizedLocation
 
 MAX_UPLOAD = 2 * 1024 * 1024
 MAX_BODY = MAX_UPLOAD + 64 * 1024  # Multipart headers/boundary allowance.
@@ -90,15 +92,17 @@ class MatchResult(BaseModel):
 
 
 def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
-               cache_limit=512, ttl_seconds=600, allowed_origins=None):
+               cache_limit=512, ttl_seconds=600, allowed_origins=None, state_dir=None):
     data_dir = Path(data_dir or os.getenv('HOUND_DATA_DIR', 'data'))
+    state_dir = Path(state_dir or os.getenv('HOUND_STATE_DIR') or data_dir)
     if cache_limit < 1 or ttl_seconds <= 0:
         raise ValueError('Cache size and TTL must be positive')
     lock = RLock()
     rate_lock = RLock()
     cache = OrderedDict()
     requests = OrderedDict()
-    state = {'matcher': matcher, 'router': router, 'db': None, 'version': 0, 'rollback': None}
+    state = {'matcher': matcher, 'router': router, 'db': None, 'version': 0, 'rollback': None,
+             'store': None, 'base_snapshot': None}
 
     def prune():
         now = clock()
@@ -126,20 +130,42 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                     logger.error('Recognition backend unavailable: %s', error)
             elif stub_spot:
                 state['matcher'] = StubBackend(state['router'].nodes[stub_spot])
-        data_dir.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(data_dir / 'corrections.sqlite', check_same_thread=False)
+        state_dir.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(state_dir / 'corrections.sqlite', check_same_thread=False)
+        db.execute('PRAGMA foreign_keys = ON')
         db.execute('CREATE TABLE IF NOT EXISTS corrections ('
                    'photo_id TEXT PRIMARY KEY, true_spot TEXT, predicted TEXT, '
                    'confidence REAL, created_at TEXT)')
         db.commit()
         state['db'] = db
         try:
+            model, routes = state['matcher'], state['router']
+            if model is not None and routes is not None:
+                store = CorrectionStore(db, index_context(data_dir, model, routes))
+                state['store'] = store
+                if state['base_snapshot'] is None:
+                    state['base_snapshot'] = model.snapshot()
+                else:
+                    model.restore(state['base_snapshot'])
+                state['rollback'] = None
+                try:
+                    for photo_id, label, vector in store.records():
+                        if label not in routes.nodes:
+                            raise ValueError('Stored correction references an unknown node')
+                        snapshot = model.snapshot()
+                        model.apply_correction(model.prepare_correction(vector, label))
+                        state['rollback'] = (photo_id, snapshot)
+                except Exception:
+                    model.restore(state['base_snapshot'])
+                    raise
+                state['version'] = store.version
             yield
         finally:
             cache.clear()
             requests.clear()
             db.close()
             state['db'] = None
+            state['store'] = None
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(UploadLimit)
@@ -206,7 +232,13 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                 model = state['matcher']
                 if model is None or state['router'] is None:
                     raise HTTPException(503, 'Recognition data not ready')
-                result = dict(model.locate(image))
+                try:
+                    result = dict(model.locate(image))
+                except UnrecognizedLocation:
+                    raise HTTPException(422, {
+                        'code': 'unrecognized_location',
+                        'message': 'Location not recognized. Take another hallway photo or choose a starting location.',
+                    }) from None
                 vector = np.asarray(result.pop('vector'), dtype=np.float32)
                 norm = np.linalg.norm(vector.astype(np.float64))
                 if vector.shape != (384,) or not np.isfinite(vector).all() or not np.isfinite(norm) or norm == 0:
@@ -288,12 +320,13 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                     db.execute('INSERT INTO corrections VALUES (?, ?, ?, ?, ?)',
                                (body.photo_id, body.true_spot, entry['predicted'], entry['confidence'],
                                 datetime.now(timezone.utc).isoformat()))
+                    state['store'].add(body.photo_id, entry['vector'])
                     model.apply_correction(prepared)
             except Exception:
                 model.restore(snapshot)
                 raise
             state['rollback'] = (body.photo_id, snapshot)
-            state['version'] += 1
+            state['version'] = state['store'].version
             del cache[body.photo_id]
             return {'ok': True, 'index_size': model.size}
 
@@ -307,7 +340,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             current = model.snapshot()
             try:
                 with db:
-                    db.execute('DELETE FROM corrections WHERE photo_id = ?', (photo_id,))
+                    state['store'].remove(photo_id)
                     model.restore(snapshot)
             except Exception:
                 model.restore(current)
@@ -315,7 +348,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             # Invalidate vectors computed against the replaced index version.
             cache.clear()
             state['rollback'] = None
-            state['version'] += 1
+            state['version'] = state['store'].version
             return state['version']
 
     app.state.rollback_last_correction = rollback_last_correction

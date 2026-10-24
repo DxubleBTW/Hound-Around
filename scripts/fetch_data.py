@@ -20,6 +20,7 @@ from pathlib import Path
 
 # The three private runtime files the app loads from HOUND_DATA_DIR.
 DATA_FILES = ('graph.json', 'rooms.json', 'index.npz')
+OPTIONAL_DATA_FILES = ('recognition.json',)
 
 
 def log(message: str) -> None:
@@ -48,7 +49,7 @@ def main() -> int:
         return 0
 
     data_dir.mkdir(parents=True, exist_ok=True)
-    for filename in DATA_FILES:
+    for filename in DATA_FILES + OPTIONAL_DATA_FILES:
         try:
             path = hf_hub_download(
                 repo_id=repo_id,
