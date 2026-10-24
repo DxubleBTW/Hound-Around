@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { route, friendlyError } from '../api.js'
+import { route } from '../api.js'
 import { spotName } from '../lib/spots.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 
@@ -27,10 +27,11 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   const reduced = prefersReducedMotion()
 
   useEffect(() => {
+    const controller = new AbortController()
     let live = true
     setError('')
     const to = dest.trim()
-    const run = (opts) => route(opts)
+    const run = (opts) => route(opts, { signal: controller.signal })
 
     run({ from, to, accessible, heading })
       .catch((e) => {
@@ -40,14 +41,14 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
       })
       .then((r) => { if (live) setData(r) })
       .catch((e) => {
-        if (!live) return
+        if (!live || e?.name === 'AbortError') return
         if (e?.status === 404 && accessible) {
           setError('No step-free route to that room. Turn off “Elevators only” to use stairs.')
         } else {
-          setError(friendlyError(e, 'route'))
+          setError(e?.message || 'Couldn’t plan that route. Try again.')
         }
       })
-    return () => { live = false }
+    return () => { live = false; controller.abort() }
   }, [from, dest, accessible, heading])
 
   // Short vibration on each step change, where supported and motion is allowed.

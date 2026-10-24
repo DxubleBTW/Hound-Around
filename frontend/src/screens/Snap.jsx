@@ -15,16 +15,18 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    setBusy(true)
     setHint('')
+    setBusy(true)
     try {
-      const { blob, sharpness } = await shrinkImage(file)
+      const blob = await shrinkImage(file)
       // On-phone blur/blank check: don't upload a photo that can't match.
-      if (sharpness < BLUR_THRESHOLD) {
+      if (typeof blob.sharpness === 'number' && blob.sharpness < BLUR_THRESHOLD) {
         setHint('That looked blurry or blank. Step back and point down the hallway or at a room number.')
         return
       }
       onPhoto({ blob, url: URL.createObjectURL(blob) })
+    } catch (err) {
+      setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
     } finally {
       setBusy(false)
     }
@@ -54,7 +56,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
         <div className="flex flex-wrap gap-2">
           {QUICK.map((q) => (
             <button key={q.room} onClick={() => setDest(q.room)}
-              className={`rounded-full border px-3 py-1.5 text-sm ${dest === q.room ? 'border-scarlet bg-scarlet/5 text-scarlet' : 'border-line text-muted'}`}>
+              className={`min-h-[44px] rounded-full border px-3 py-1.5 text-sm ${dest === q.room ? 'border-scarlet bg-scarlet/5 text-scarlet' : 'border-line text-muted'}`}>
               {q.label}
             </button>
           ))}
@@ -75,10 +77,10 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
       <div className="mt-auto pt-8">
         <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
         <button onClick={() => input.current?.click()} disabled={busy || !dest.trim()}
-          className="flex w-full items-center justify-center gap-3 rounded-3xl bg-scarlet py-5 font-display text-xl font-bold text-white shadow-[0_10px_30px_-10px_rgba(204,0,0,.6)] active:scale-[.98] disabled:opacity-50">
+          className="flex min-h-[44px] w-full items-center justify-center gap-3 rounded-3xl bg-scarlet py-5 font-display text-xl font-bold text-white shadow-[0_10px_30px_-10px_rgba(204,0,0,.6)] active:scale-[.98] disabled:opacity-50">
           <CameraIcon /> {busy ? 'Preparing…' : 'Snap the hallway'}
         </button>
-        {hint && <p className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
+        {hint && <p role="alert" className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
         <p className="mt-3 text-center text-xs text-muted">No GPS, no tracking. Your photo is deleted after matching.</p>
       </div>
     </main>

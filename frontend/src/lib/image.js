@@ -1,20 +1,41 @@
 // Shrink a camera photo to ~512px on the long side before upload (brief: keeps uploads fast on event Wi-Fi).
 // Honors EXIF orientation. Never reads location; the photo is the only input.
 export async function shrinkImage(file, maxSide = 512, quality = 0.85) {
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
-  const w = Math.round(bitmap.width * scale)
-  const h = Math.round(bitmap.height * scale)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  bitmap.close?.()
-  const sharpness = laplacianVariance(ctx, w, h)
-  // Re-encoding through a canvas also drops EXIF metadata (incl. any GPS tags) from the upload.
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
-  return { blob, sharpness }
+  if (!file || !file.size) throw new Error('This photo is empty. Take another photo.')
+  let bitmap
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  } catch {
+    throw new Error('We could not open this photo. Try another photo or a JPEG or PNG file.')
+  }
+  try {
+    if (!bitmap.width || !bitmap.height) throw new Error('This photo has no image. Take another photo.')
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
+    const w = Math.max(1, Math.round(bitmap.width * scale))
+    const h = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Photo preparation is unavailable. Try again or use another browser.')
+    context.drawImage(bitmap, 0, 0, w, h)
+    // On-phone blur/blank check on the shrunk canvas. Skipped where getImageData
+    // is unavailable; no pixels leave the device for this measurement.
+    const sharpness = typeof context.getImageData === 'function' ? laplacianVariance(context, w, h) : null
+    // Re-encoding through a canvas also drops EXIF metadata (incl. any GPS tags) from the upload.
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((out) => {
+        if (!out?.size) reject(new Error('We could not prepare this photo. Take another photo and try again.'))
+        else resolve(out)
+      }, 'image/jpeg', quality)
+    })
+    // Attach the measurement so callers (Snap) can warn on blurry/blank photos
+    // without a second decode. The return is still a Blob, so uploads are unchanged.
+    try { blob.sharpness = sharpness } catch { /* some Blob impls are frozen; ignore */ }
+    return blob
+  } finally {
+    bitmap.close?.()
+  }
 }
 
 // Variance of the Laplacian on the 512px grayscale canvas: a cheap on-phone blur/blank

@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
-import { locate, friendlyError } from '../api.js'
-
-const TIMEOUT_MS = 8000
+import { locate } from '../api.js'
 
 export default function Locating({ photo, onDone, onCancel }) {
   const [error, setError] = useState('')
@@ -16,26 +14,21 @@ export default function Locating({ photo, onDone, onCancel }) {
 
     // Flip to "Matching…" once the upload has had a moment to leave the device.
     const stageTimer = setTimeout(() => live && setStage('matching'), 900)
-    // ~8s overall budget: abort the in-flight request and surface a retry.
-    const timeoutTimer = setTimeout(() => {
-      if (!live) return
-      controller.abort()
-      setError('That took too long. Tap to try again.')
-    }, TIMEOUT_MS)
 
+    // requestJson enforces its own ~8s timeout and returns a friendly, retryable
+    // message; we only surface it. The controller cancels the in-flight /locate on
+    // retake/unmount so a stale result never lands.
     locate(photo.blob, { signal: controller.signal })
       .then((r) => { if (live) onDone(r) })
       .catch((e) => {
-        // Aborts come from retake or our own timeout; the timeout path sets its
-        // own message, retake unmounts us, so ignore AbortError here.
+        // Aborts come from retake/unmount only; that path unmounts us, so ignore it.
         if (!live || e?.name === 'AbortError') return
-        setError(friendlyError(e, 'locate'))
+        setError(e?.message || 'That took too long. Tap to try again.')
       })
 
     return () => {
       live = false
       clearTimeout(stageTimer)
-      clearTimeout(timeoutTimer)
       controller.abort() // never surface a stale result after retake/unmount
     }
   }, [attempt]) // eslint-disable-line react-hooks/exhaustive-deps
