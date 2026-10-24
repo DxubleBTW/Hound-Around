@@ -14,6 +14,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
   const [failure, setFailure] = useState(null)
   const pending = useRef(null)
   const votes = Math.round((loc.confidence || 0) * 10)
+  const maxVotes = Math.max(1, ...(loc.top3 || []).map((t) => t.votes || 0))
 
   useEffect(() => () => pending.current?.abort(), [])
 
@@ -56,11 +57,16 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
       </div>
 
       {!picking && (
-        <div className="mt-6">
-          <div className="flex justify-between text-sm"><span className="text-muted">Match strength</span><span className="font-semibold">{votes}/10 frames agree</span></div>
-          <div className="mt-2 flex gap-1">
+        <div className="mt-6 rounded-2xl border border-line bg-white p-4 shadow-sm">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="text-muted">Match strength</span>
+            <span><span className="font-display text-lg font-extrabold text-scarlet">{votes}</span><span className="font-semibold text-muted">/10 frames agree</span></span>
+          </div>
+          <div className="mt-2 flex gap-1" role="img" aria-label={`${votes} of 10 frames agree`}>
             {Array.from({ length: 10 }).map((_, i) => (
-              <span key={i} className={`h-2 flex-1 rounded-full ${i < votes ? 'bg-scarlet' : 'bg-line'}`} />
+              <span key={i} className="h-2.5 flex-1 overflow-hidden rounded-full bg-line">
+                {i < votes && <span className="grow-x block h-full w-full rounded-full bg-scarlet" style={{ animationDelay: `${i * 0.04}s` }} />}
+              </span>
             ))}
           </div>
           {loc.ocr_room && <p className="mt-3 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>}
@@ -76,12 +82,14 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
           {(loc.top3 || []).map((t, i) => (
             <li key={t.spot}>
               <button onClick={() => pick(t.spot)} disabled={!!saving}
-                className="flex w-full items-center justify-between rounded-2xl border border-line bg-white px-4 py-4 text-left active:border-scarlet disabled:opacity-60">
-                <span>
+                className="relative flex w-full items-center justify-between overflow-hidden rounded-2xl border border-line bg-white px-4 py-4 text-left shadow-sm transition active:scale-[.99] active:border-scarlet disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
+                {/* Vote bar fills proportionally to the strongest candidate. */}
+                <span aria-hidden className="grow-x absolute inset-y-0 left-0 bg-scarlet/5" style={{ width: `${Math.round((t.votes / maxVotes) * 100)}%`, animationDelay: `${i * 0.06}s` }} />
+                <span className="relative">
                   <span className="block font-semibold">{spotName(t.spot)}</span>
                   <span className="block text-sm text-muted">{floorName(floorNum(t.spot))}{i === 0 ? ' · best guess' : ''}</span>
                 </span>
-                <span className="text-sm text-muted">{saving === t.spot ? 'Saving…' : `${t.votes} votes`}</span>
+                <span className="relative text-sm font-medium text-muted">{saving === t.spot ? 'Saving…' : `${t.votes} votes`}</span>
               </button>
             </li>
           ))}
@@ -111,8 +119,8 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
           <>
             <p className="text-center font-display text-lg font-bold">Right spot?</p>
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setPicking(true)} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold">Not quite</button>
-              <button onClick={() => pick(loc.spot)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white">Yes, route me</button>
+              <button onClick={() => setPicking(true)} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Not quite</button>
+              <button onClick={() => pick(loc.spot)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Yes, route me</button>
             </div>
           </>
         ) : !failure && (

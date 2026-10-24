@@ -1,7 +1,7 @@
 // Client for the Hound Around API. Shapes follow docs/contract.md exactly.
 // With VITE_API_URL unset, everything runs on mock data so the UI can be demoed without the backend.
 
-import { delay, requestJson } from './lib/request.js'
+import { checkHealth, delay, requestJson } from './lib/request.js'
 
 const BASE = (import.meta.env?.VITE_API_URL || '').replace(/\/$/, '')
 export const MOCK = !BASE
@@ -30,6 +30,13 @@ export async function correct(photo_id, true_spot, { signal } = {}) {
     body: JSON.stringify({ photo_id, true_spot }),
     signal, operation: 'correct',
   })
+}
+
+// Health has a longer timeout than other calls so a sleeping Hugging Face Space
+// has time to wake. MOCK reports a ready "mock" model so no status pill shows.
+export async function health() {
+  if (MOCK) return { ok: true, reachable: true, index_size: 2213, model: 'mock' }
+  return checkHealth(BASE + '/health')
 }
 
 // ---------- mock data (ids taken from docs/contract.md examples) ----------

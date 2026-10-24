@@ -93,6 +93,29 @@ function validResponse(data, operation) {
   return true
 }
 
+// GET /health probe. Longer timeout than normal calls so a sleeping Hugging Face
+// Space has time to wake. Never throws: a network failure resolves to
+// { ok:false, reachable:false }, a 503-with-body (model still loading) resolves to
+// { ok:false, reachable:true, model }, and a ready backend to { ok:true, ... }.
+export async function checkHealth(url, { timeoutMs = 15000 } = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    const body = await response.json().catch(() => ({}))
+    return {
+      ok: response.ok && body?.ok === true,
+      reachable: true,
+      index_size: Number.isInteger(body?.index_size) ? body.index_size : 0,
+      model: typeof body?.model === 'string' ? body.model : '',
+    }
+  } catch {
+    return { ok: false, reachable: false, index_size: 0, model: '' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 // Mock requests honor cancellation too, including when navigating away.
 export function delay(ms, value, signal) {
   return new Promise((resolve, reject) => {
