@@ -21,7 +21,7 @@ To use the real backend, copy `.env.example` to `.env.local` and set `VITE_API_U
 
 ## Vercel
 
-Live: **https://hound-around-theta.vercel.app**. Pushes to `main` deploy production; every branch/PR gets a preview link.
+Live: **https://www.hound-around.tech**. Pushes to `main` deploy production; every branch/PR gets a preview link.
 
 No dashboard changes needed. The build is configured in the repo:
 - Root Directory = repo root (current setting): `/vercel.json` installs and builds `frontend/` and serves `frontend/dist`.
