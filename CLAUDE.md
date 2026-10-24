@@ -18,6 +18,11 @@ Stack: FastAPI (Python 3.11) on Hugging Face Spaces · React+Vite+Tailwind on Ve
 - mediapipe is 1.x and OpenCV is 5.x: use the mediapipe Tasks face detector, not mp.solutions.
 - ffmpeg is installed via winget (Gyan.FFmpeg). iPhone HDR clips (color_transfer arib-std-b67) need tone-mapping to SDR.
 
+## Data pipeline (pipeline/, see pipeline/README.md)
+- extract_frames.py → frames at 2 fps + whisper transcript. label_frames.py → labels.csv + train/<spot>/ folders. blur_faces.py → faces blurred in place.
+- Always blur before frames leave the laptop. Model weights live in pipeline/models/ (gitignored).
+- Private inputs stay in data/ (gitignored): anchors.json, nodes.txt, graph.json, rooms.json.
+
 ## API contract (summary; full version in docs/contract.md)
 - POST /locate (multipart image) → {photo_id, spot, floor, heading, confidence, top3:[{spot,votes}], ocr_room, ocr_floor, ms}
 - GET /route?from=&to=&accessible=&heading= → {steps:[{instruction, meters, node}], total_meters, est_seconds}. `to` accepts a node id or a room number via data/rooms.json.
