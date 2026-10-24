@@ -1,10 +1,6 @@
 import { useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
-
-const QUICK = [
-  { room: '164', label: 'Room 164 · Closing Ceremony' },
-  { room: 'B62', label: 'B62' },
-]
+import { ALL_DESTS, DEST_GROUPS, resolveDestination } from '../lib/destinations.js'
 
 export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto }) {
   const input = useRef(null)
@@ -47,20 +43,43 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
         </div>
       </header>
 
-      <section className="mt-8 space-y-3">
-        <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
-        <input
-          id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-          placeholder="Room number, e.g. 164"
-          className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
-          autoComplete="off" inputMode="text"
-        />
-        <div className="flex flex-wrap gap-2">
-          {QUICK.map((q) => (
-            <button key={q.room} onClick={() => setDest(q.room)}
-              className={`min-h-[44px] rounded-full border px-3 py-1.5 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${dest === q.room ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted'}`}>
-              {q.label}
-            </button>
+      <section className="mt-8 space-y-4">
+        <div className="space-y-2">
+          <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
+          <input
+            id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
+            onBlur={(e) => { const r = resolveDestination(e.target.value); if (r !== e.target.value) setDest(r) }}
+            list="dest-suggestions"
+            placeholder="Room number or place, e.g. 164 or floor 1 bathroom"
+            className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
+            autoComplete="off" inputMode="text"
+            aria-describedby="dest-hint"
+          />
+          {/* Suggestions are drawn ONLY from the verified set so nothing implies rooms we can't route to. */}
+          <datalist id="dest-suggestions">
+            {ALL_DESTS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </datalist>
+          <p id="dest-hint" className="text-xs text-muted">Type a room number, a node, or a place like “floor 2 restroom”.</p>
+        </div>
+
+        {/* Grouped quick-picks: a tidy, scrollable chip set from verified-real destinations only. */}
+        <div className="space-y-3">
+          {DEST_GROUPS.map((group) => (
+            <div key={group.title}>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</p>
+              <div className="flex flex-wrap gap-2">
+                {group.items.map((q) => {
+                  const active = resolveDestination(dest) === q.value
+                  return (
+                    <button key={q.value} type="button" onClick={() => setDest(q.value)}
+                      aria-pressed={active}
+                      className={`min-h-[44px] rounded-full border px-3.5 py-2 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${active ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted hover:border-scarlet/40'}`}>
+                      {q.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ))}
         </div>
 

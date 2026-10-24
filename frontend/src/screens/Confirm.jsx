@@ -2,10 +2,32 @@ import { useEffect, useRef, useState } from 'react'
 import { correct } from '../api.js'
 import { floorName, floorOf, spotName } from '../lib/spots.js'
 
-// Contract rule: below ~0.6 confidence, or when the top 3 span floors, show the top-3 picker.
+// Three confidence bands over the contract's existing fields (confidence =
+// winning_votes/10; no backend relevance score exists yet — see note below):
+//   confidence <  MIN_RELEVANCE          -> irrelevant: the photo matches nowhere
+//                                            in the building, so ask for a retake.
+//   MIN_RELEVANCE <= confidence < PICKER  -> uncertain: show the top-3 picker.
+//   confidence >= PICKER (and one floor)  -> confident: route directly.
+//
+// Rationale: a photo of a random object / person / outdoors will not cluster near
+// any indexed hallway, so the winning spot gets very few of the 10 votes. 0.2 means
+// the top candidate won <= 2/10 votes.
+//
+// Open question for the team/contract: a dedicated backend distance/relevance score
+// (e.g. embedding distance to the nearest indexed frame) would be far more robust
+// than inferring relevance from vote share. That is a contract change, not for this PR.
+const MIN_RELEVANCE = 0.2
+const PICKER_THRESHOLD = 0.6
+
+// Below MIN_RELEVANCE the top guess is too weak to trust as a location at all.
+function isIrrelevant(loc) {
+  return (loc.confidence || 0) < MIN_RELEVANCE
+}
+
+// In the uncertain band, or when the top 3 span floors, show the top-3 picker.
 function needsPicker(loc) {
   const floors = new Set((loc.top3 || []).map((t) => floorOf(t.spot).code))
-  return loc.confidence < 0.6 || floors.size > 1
+  return loc.confidence < PICKER_THRESHOLD || floors.size > 1
 }
 
 export default function Confirm({ photo, loc, onConfirm, onRetake }) {
@@ -18,6 +40,29 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
   const maxVotes = Math.max(1, ...(loc.top3 || []).map((t) => t.votes || 0))
 
   useEffect(() => () => pending.current?.abort(), [])
+
+  // Irrelevant photo: don't route, don't show the picker — ask for a better shot.
+  if (isIrrelevant(loc)) {
+    return (
+      <main className="rise flex flex-1 flex-col justify-center text-center">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-scarlet/10 text-scarlet" aria-hidden>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v3" /><path d="M11 14h.01" />
+          </svg>
+        </div>
+        <h2 className="mt-6 font-display text-3xl font-extrabold leading-tight">Hmm — I can’t tell<br />where this is.</h2>
+        <p className="mt-3 text-muted">
+          Point your camera down a hallway or at a room-number sign, and make sure you’re inside the CDS building.
+        </p>
+        <button
+          onClick={onRetake}
+          className="mt-8 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-display text-lg font-bold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet"
+        >
+          Take another photo
+        </button>
+      </main>
+    )
+  }
 
   async function pick(spot) {
     if (pending.current) return
