@@ -17,6 +17,15 @@ the west entrance to Room 164 came back as 3 steps, 65 m; CORS allows the produc
 
 ## What works
 
+- **Integration verification (Oct 24):** 67 backend/ML/evaluation/property tests and 37 frontend tests pass.
+  The new full-cycle integration test loads the real ML factory/index with a deterministic synthetic embedder,
+  then exercises locate → accessible route → correction → re-snap → rollback. This is software verification,
+  not recognition accuracy. A mobile-sized browser also reached the live backend's health and routing through
+  the local proxy and directly from a configured static production build (including CORS). Locate/correct were
+  intercepted fixtures to avoid altering the production index; a new real-photo recognition check remains pending.
+- **Frontend integration fixes:** route retry is restored, route results are cleared when inputs change, and
+  confidence displays as match strength rather than claiming exact frame agreement. The local proxy setup is
+  documented in `frontend/README.md`. Production still needs the Vercel environment/redeploy handoff below.
 - **Core loop end to end through the real API:** photo → spot + floor → route (accessible mode uses elevators) →
   correction goes live in the index.
 - **Data:** about 2,400 face-blurred, labeled frames from three filming sessions Saturday morning: B1 (3 walks), F1
@@ -70,7 +79,7 @@ in-building number; the outsider test set will be the headline number.
 | 3 | **Film F1 again**, a second session: 360° clips at every F1 spot, plus `class24`, `class48`, `south_stair`, `cafe_entry`, `restrooms_w`, `stair_east`. F1 is the demo floor | Data (David) |
 | 4 | F2 360° clips for one-video spots (`hall_w`, `hall_ne`, `hall_north`, `core_elev`, `core_e`, `csbuilds`, `open_study`, `class20`, `class48c`) and the missing `class48a`; close-ups of room-number signs | Data |
 | 5 | Confirm which doors are 262, 263, 264, 265 and B62 (current mapping is inferred from walk order) | Anyone on site |
-| 6 | Restore the "Try again" button on the route screen (lost in the Kiro front-end merge) | Front end |
+| 6 | Review/merge the integration branch restoring route retry and clearing stale route results; verified locally | Front end |
 | 7 | Phone test on event Wi-Fi and cellular | Front end |
 | 8 | Interviews (~10), stranger timing test, slides, demo script, backup video. **Devpost project tonight; submit by Sun 10 AM** | Pitch |
 | 9 | Ethics Genius Bar visit (basement yellow space); ethics slide | David + Pitch |

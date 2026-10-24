@@ -33,10 +33,13 @@ function floorBadge(instruction = '') {
 }
 
 export default function Route({ from, heading, dest, accessible, onRestart }) {
-  const [data, setData] = useState(null)
+  const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
   const [dir, setDir] = useState('fwd') // which way the last step change moved
+  const [attempt, setAttempt] = useState(0)
+  const requestKey = JSON.stringify([from, dest.trim(), accessible, heading])
+  const data = response?.key === requestKey ? response.data : null
   const reduced = prefersReducedMotion()
 
   // Advancing slides the next step in from the right ('rise-left'); going Back
@@ -47,7 +50,10 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   useEffect(() => {
     const controller = new AbortController()
     let live = true
+    setResponse(null)
     setError('')
+    setI(0)
+    setDir('fwd')
     const to = dest.trim()
     const run = (opts) => route(opts, { signal: controller.signal })
 
@@ -57,31 +63,32 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
         if (e?.status === 422 && heading) return run({ from, to, accessible })
         throw e
       })
-      .then((r) => { if (live) setData(r) })
+      .then((r) => { if (live) setResponse({ key: requestKey, data: r }) })
       .catch((e) => {
         if (!live || e?.name === 'AbortError') return
         if (e?.status === 404 && accessible) {
-          setError('No step-free route to that room. Turn off “Elevators only” to use stairs.')
+          setError({ key: requestKey, message: 'No step-free route to that room. Choose another destination or check the route setting.' })
         } else {
-          setError(e?.message || 'Couldn’t plan that route. Try again.')
+          setError({ key: requestKey, message: e?.message || 'Couldn’t plan that route. Try again.' })
         }
       })
     return () => { live = false; controller.abort() }
-  }, [from, dest, accessible, heading])
+  }, [from, dest, accessible, heading, requestKey, attempt])
 
   // Short vibration on each step change, where supported and motion is allowed.
   useEffect(() => { if (data) tick(15) }, [i, data])
 
-  if (error) {
+  if (error && error.key === requestKey) {
     return (
       <main className="rise flex flex-1 flex-col justify-center text-center">
         <p className="font-display text-2xl font-bold">Couldn’t find a route to {dest}</p>
-        <p className="mt-2 text-sm text-muted">{error}</p>
+        <p role="alert" className="mt-2 text-sm text-muted">{error.message}</p>
+        <button onClick={() => setAttempt((value) => value + 1)} className="mt-6 min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Try again</button>
         <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Start over</button>
       </main>
     )
   }
-  if (!data) return <main className="flex flex-1 items-center justify-center text-muted">Planning your route…</main>
+  if (!data) return <main role="status" className="flex flex-1 items-center justify-center text-muted">Planning your route…</main>
 
   const steps = data.steps || []
   const arrived = i >= steps.length

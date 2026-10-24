@@ -13,7 +13,8 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
   const pending = useRef(null)
-  const votes = Math.round((loc.confidence || 0) * 10)
+  const strength = Math.round((loc.confidence || 0) * 100)
+  const filled = Math.round((loc.confidence || 0) * 10)
   const maxVotes = Math.max(1, ...(loc.top3 || []).map((t) => t.votes || 0))
 
   useEffect(() => () => pending.current?.abort(), [])
@@ -60,12 +61,12 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
         <div className="mt-6 rounded-2xl border border-line bg-white p-4 shadow-sm">
           <div className="flex items-baseline justify-between text-sm">
             <span className="text-muted">Match strength</span>
-            <span><span className="font-display text-lg font-extrabold text-scarlet">{votes}</span><span className="font-semibold text-muted">/10 frames agree</span></span>
+            <span className="font-display text-lg font-extrabold text-scarlet">{strength}%</span>
           </div>
-          <div className="mt-2 flex gap-1" role="img" aria-label={`${votes} of 10 frames agree`}>
+          <div className="mt-2 flex gap-1" role="img" aria-label={`Match strength ${strength} percent`}>
             {Array.from({ length: 10 }).map((_, i) => (
               <span key={i} className="h-2.5 flex-1 overflow-hidden rounded-full bg-line">
-                {i < votes && <span className="grow-x block h-full w-full rounded-full bg-scarlet" style={{ animationDelay: `${i * 0.04}s` }} />}
+                {i < filled && <span className="grow-x block h-full w-full rounded-full bg-scarlet" style={{ animationDelay: `${i * 0.04}s` }} />}
               </span>
             ))}
           </div>
