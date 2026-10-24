@@ -13,7 +13,9 @@ data/
 # Large artifacts (index ships to the Space separately)
 *.npz
 *.sqlite
+*.sqlite-*
 *.db
+*.db-*
 
 # Python
 .venv/

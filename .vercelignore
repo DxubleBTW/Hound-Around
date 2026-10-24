@@ -16,6 +16,7 @@ deploy/
 
 # Python dependency + project files that trigger Vercel's Python runtime
 requirements.txt
+requirements-core.txt
 requirements-dev.txt
 requirements-experiments.txt
 requirements-ml.txt
