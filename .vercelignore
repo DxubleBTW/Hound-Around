@@ -1,0 +1,40 @@
+# Vercel builds ONLY the static frontend (frontend/ -> Vite -> frontend/dist).
+# The Python backend (FastAPI + DINOv2/EasyOCR) is deployed to a Hugging Face
+# Space, never to Vercel. Exclude every Python/ML surface so Vercel does not:
+#   - auto-detect the root `api/` directory as serverless functions, or
+#   - try to install requirements.txt (torch+transformers+easyocr ~5.8 GB,
+#     which blows past the 500 MB function limit).
+# Keep `frontend/` and the Vercel config in the deployment context.
+
+# Python backend / recognition / pipeline (served by Hugging Face, not Vercel)
+api/
+ml/
+pipeline/
+scripts/
+tests/
+deploy/
+
+# Python dependency + project files that trigger Vercel's Python runtime
+requirements.txt
+requirements-dev.txt
+requirements-experiments.txt
+requirements-ml.txt
+pyproject.toml
+Pipfile
+Pipfile.lock
+.python-version
+setup.py
+setup.cfg
+
+# Containerization (the HF Space uses the Dockerfile; Vercel does not)
+Dockerfile
+.dockerignore
+
+# Data is private and gitignored anyway, but never ship it to Vercel
+data/
+
+# Caches / artifacts
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
