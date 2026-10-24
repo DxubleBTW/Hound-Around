@@ -1,0 +1,12 @@
+# Vercel builds only the frontend (see vercel.json). Keep the Python backend out of the upload:
+# Vercel treats api/*.py as serverless functions and installs the root requirements.txt for them,
+# which since #9 includes torch/transformers/easyocr and exceeds the function size limit,
+# failing every deploy. The backend runs on the Hugging Face Space instead.
+/api
+/ml
+/pipeline
+/scripts
+/tests
+/requirements*.txt
+/Dockerfile
+/.dockerignore
