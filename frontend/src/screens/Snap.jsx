@@ -1,24 +1,32 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
 
 const QUICK = [
-  { room: '164', label: 'Room 164 · Closing Ceremony' },
-  { room: 'B62', label: 'B62' },
+  { value: '164', name: 'Room 164 · Closing Ceremony' },
+  { value: 'B62', name: 'B62' },
 ]
 
-export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto }) {
+export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto, onManual, destinations = QUICK }) {
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState('')
+  const active = useRef(true)
+  const preparation = useRef(0)
+  useEffect(() => {
+    active.current = true
+    return () => { active.current = false; preparation.current += 1 }
+  }, [])
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const request = ++preparation.current
     setHint('')
     setBusy(true)
     try {
       const blob = await shrinkImage(file)
+      if (!active.current || request !== preparation.current) return
       // On-phone blur/blank check: don't upload a photo that can't match.
       if (typeof blob.sharpness === 'number' && blob.sharpness < BLUR_THRESHOLD) {
         setHint('That looked blurry or blank. Step back and point down the hallway or at a room number.')
@@ -26,9 +34,9 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
       }
       onPhoto({ blob, url: URL.createObjectURL(blob) })
     } catch (err) {
-      setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
+      if (active.current && request === preparation.current) setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
     } finally {
-      setBusy(false)
+      if (active.current && request === preparation.current) setBusy(false)
     }
   }
 
@@ -51,15 +59,19 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
         <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
         <input
           id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-          placeholder="Room number, e.g. 164"
+          placeholder={destinations[0]?.value ? `Room number, e.g. ${destinations[0].value}` : 'Room number or name'}
+          list="destination-suggestions"
           className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
           autoComplete="off" inputMode="text"
         />
+        <datalist id="destination-suggestions">
+          {destinations.map((item) => <option key={item.value} value={item.value}>{item.name || item.label}</option>)}
+        </datalist>
         <div className="flex flex-wrap gap-2">
-          {QUICK.map((q) => (
-            <button key={q.room} onClick={() => setDest(q.room)}
-              className={`min-h-[44px] rounded-full border px-3 py-1.5 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${dest === q.room ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted'}`}>
-              {q.label}
+          {destinations.slice(0, 4).map((q) => (
+            <button key={q.value} onClick={() => setDest(q.value)}
+              className={`min-h-[44px] rounded-full border px-3 py-1.5 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${dest === q.value ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted'}`}>
+              {q.name || q.label}
             </button>
           ))}
         </div>
@@ -85,6 +97,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
           <span className="relative">{busy ? 'Preparing…' : 'Snap the hallway'}</span>
         </button>
         {hint && <p role="alert" className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
+        <button onClick={onManual} disabled={busy || !dest.trim()} className="min-h-[44px] w-full py-3 font-semibold text-muted disabled:opacity-50">Choose my starting room instead</button>
         <p className="mt-3 text-center text-xs text-muted">No GPS, no tracking. Your photo is deleted after matching.</p>
       </div>
     </main>

@@ -1,22 +1,44 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
-import { MOCK, health } from './api.js'
+import ManualStart from './screens/ManualStart.jsx'
+import { createApi } from './api.js'
+import { buildingConfig } from './lib/campuses.js'
+import CampusPicker from './screens/CampusPicker.jsx'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
-function initialDest() {
-  if (typeof window === 'undefined') return '164'
+function initialDest(fallback) {
+  if (typeof window === 'undefined') return fallback
   const to = new URLSearchParams(window.location.search).get('to')
-  return to && to.trim() ? to.trim() : '164'
+  return to && to.trim() ? to.trim() : fallback
 }
 
 // Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
 export default function App() {
+  const env = import.meta.env || {}
+  const [selection, setSelection] = useState({ school: 'bu', building: 'cds' })
+  const [choosing, setChoosing] = useState(false)
+  const building = buildingConfig(selection.school, selection.building, env)
+  const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
+  if (choosing || !building?.available) {
+    return <CampusPicker current={building || { schoolId: 'bu' }} env={env}
+      onCancel={() => setChoosing(false)}
+      onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} />
+  }
+  return <Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
+    onSchoolChange={() => setChoosing(true)} />
+}
+
+function Navigation({ api, building, onSchoolChange }) {
+  const { MOCK, health } = api
   const [screen, setScreen] = useState('snap')
-  const [dest, setDest] = useState(initialDest)
+  const [dest, setDest] = useState(() => {
+    const fallback = building.destinations[0]?.value || ''
+    return building.schoolId === 'bu' && building.id === 'cds' ? initialDest(fallback) : fallback
+  })
   const [accessible, setAccessible] = useState(false)
   const [photo, setPhoto] = useState(null) // { blob, url }
   const [loc, setLoc] = useState(null) // /locate response
@@ -26,6 +48,8 @@ export default function App() {
   // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
   const [server, setServer] = useState(MOCK ? 'ok' : 'checking')
   const [model, setModel] = useState('')
+
+  useEffect(() => () => { if (photo?.url) URL.revokeObjectURL(photo.url) }, [photo?.url])
 
   const flash = (msg, celebrate = false) => { setToast({ msg, celebrate }); setTimeout(() => setToast(null), 2600) }
 
@@ -45,11 +69,16 @@ export default function App() {
     }
     check()
     return () => { live = false; clearTimeout(timer) }
-  }, [])
+  }, [MOCK, health])
 
   const restart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url) // drop the local preview; nothing is kept
     setPhoto(null); setLoc(null); setHere(null); setScreen('snap')
+  }
+
+  const chooseStart = () => {
+    if (photo?.url) URL.revokeObjectURL(photo.url)
+    setPhoto(null); setLoc(null); setHere(null); setScreen('manual')
   }
 
   const statusPill =
@@ -62,6 +91,9 @@ export default function App() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-md flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+      <button onClick={onSchoolChange} className="mb-2 min-h-[44px] self-start text-left text-sm font-semibold">
+        {building.schoolName} · {building.shortName || building.name} · Change school
+      </button>
       {statusPill && (
         <div
           role="status"
@@ -79,6 +111,8 @@ export default function App() {
           dest={dest} setDest={setDest}
           accessible={accessible} setAccessible={setAccessible}
           onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
+          onManual={chooseStart}
+          destinations={building.destinations}
         />
       )}
       {screen === 'locating' && (
@@ -86,6 +120,9 @@ export default function App() {
           photo={photo}
           onDone={(r) => { setLoc(r); setScreen('confirm') }}
           onCancel={restart}
+          onManual={chooseStart}
+          api={api}
+          buildingLabel={building.shortName || building.name}
         />
       )}
       {screen === 'confirm' && (
@@ -100,13 +137,19 @@ export default function App() {
             setScreen('route')
           }}
           onRetake={restart}
+          onManual={chooseStart}
+          api={api}
         />
+      )}
+      {screen === 'manual' && (
+        <ManualStart landmarks={building.landmarks} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
       )}
       {screen === 'route' && (
         <Route
           from={here} heading={here === loc?.spot ? loc?.heading : undefined}
           dest={dest} accessible={accessible}
           onRestart={restart}
+          api={api}
         />
       )}
 

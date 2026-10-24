@@ -14,6 +14,24 @@ npm run dev          # http://localhost:5173 , also on your LAN IP so you can op
 With no `VITE_API_URL` set, the app runs on **mock data** (a "Demo data" pill shows at the top).
 Mock locate alternates between a confident match and an unsure one, so both demo paths are visible.
 
+## Navigation fallbacks and campus selection
+
+Choose a starting room without a photo, or use the manual option when none of the
+predictions fits. Manual routing never saves a correction. When the configured
+backend rejects an unrelated photo, **Retake photo** returns to capture rather than
+resending that photo; manual navigation remains available.
+
+The destination input provides native autocomplete from the building's explicitly
+public catalog. **Change school** opens the pixel mascot row and illustrative
+campus scene: tap a school or drag its mascot onto the scene, then choose a building.
+Switching clears the previous navigation state and uses an immutable building API
+client. Only BU/CDS is configured; other buildings need separate reviewed backends,
+public metadata, and their own `VITE_*` API settings. No floor plans are published.
+
+See [feature setup](../docs/navigation-features-proposal.md) for configuration,
+calibration, limitations, and checks. The private graph/room directory must never
+be copied into the public campus catalog.
+
 To use the real backend, copy `.env.example` to `.env.local` and set `VITE_API_URL` to the Space URL.
 
 ### Connect a local checkout to the existing live service

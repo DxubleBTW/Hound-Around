@@ -70,6 +70,34 @@ in-building number; the outsider test set will be the headline number.
 - **No index → the API reports 503** ("not ready") instead of answering with a made-up location.
 - **The OCR floor override** now re-ranks within that floor, so the app's answer is always the first picker option.
 
+## Navigation feature branch (awaiting review and deployment)
+
+`feat/navigation-fallbacks` adds manual starting-room entry, public destination
+suggestions, a pixel mascot school/building picker, restart-safe correction vectors
+and rollback, calibrated unrelated-photo rejection, and automated software checks.
+It preserves the four existing endpoints and success payloads. A rejected photo
+returns a documented 422 error; the app asks for a new photo or a manual start.
+
+Local verification: **90 Python tests, 50 frontend tests, and the production build
+passed**. Python ran on 3.14 locally; CI is configured for the required 3.11 runtime.
+Browser checks used synthetic responses for retake/manual routing and isolated
+school switching. Read-only live health/CORS/accessible-route checks passed; these
+are not new accuracy measurements. Docker image execution remains unverified here.
+
+Activation still requires:
+
+- Calibrate rejection on separate known/unrelated validation photos and evaluate
+  on held-out photos. Without a configured cutoff, the guard is inactive.
+- Redeploy the backend and frontend after review. The current live service does
+  not acquire these changes merely because they are committed to GitHub.
+- Mount persistent storage via `HOUND_STATE_DIR` for corrections to survive Space
+  replacement. Keep one worker and a unique, stable `HOUND_DATASET_ID` per building.
+- Supply reviewed data and a separate backend for each additional school/building.
+  Only BU/CDS is configured; no other school coverage is claimed.
+- Configure optional deployment-smoke repository variables and required CI checks.
+
+Setup commands and limitations: [navigation features](navigation-features-proposal.md).
+
 ## Open work, by owner
 
 | Priority | Task | Owner |
@@ -79,7 +107,7 @@ in-building number; the outsider test set will be the headline number.
 | 3 | **Film F1 again**, a second session: 360° clips at every F1 spot, plus `class24`, `class48`, `south_stair`, `cafe_entry`, `restrooms_w`, `stair_east`. F1 is the demo floor | Data (David) |
 | 4 | F2 360° clips for one-video spots (`hall_w`, `hall_ne`, `hall_north`, `core_elev`, `core_e`, `csbuilds`, `open_study`, `class20`, `class48c`) and the missing `class48a`; close-ups of room-number signs | Data |
 | 5 | Confirm which doors are 262, 263, 264, 265 and B62 (current mapping is inferred from walk order) | Anyone on site |
-| 6 | Review/merge the integration branch restoring route retry and clearing stale route results; verified locally | Front end |
+| 6 | Integration PR #15 is merged. Review/deploy the new navigation feature branch using the activation checklist above | Backend + Front end |
 | 7 | Phone test on event Wi-Fi and cellular | Front end |
 | 8 | Interviews (~10), stranger timing test, slides, demo script, backup video. **Devpost project tonight; submit by Sun 10 AM** | Pitch |
 | 9 | Ethics Genius Bar visit (basement yellow space); ethics slide | David + Pitch |
@@ -90,7 +118,9 @@ in-building number; the outsider test set will be the headline number.
   dataset, then restarts the Space. Nothing data-related goes to GitHub.
 - **New backend code on `main`:** the Space is a copy, not linked to GitHub, so David redeploys it. Export with
   `git -c core.autocrlf=false archive` (Windows line endings break `scripts/start.sh` on Linux).
-- **Corrections reset** whenever the Space restarts. That's fine for the demo.
+- **Current deployed corrections reset** when the Space restarts. The navigation
+  feature branch adds replay from SQLite; preserving state across filesystem
+  replacement also requires persistent storage as described above.
 
 ## Commands
 

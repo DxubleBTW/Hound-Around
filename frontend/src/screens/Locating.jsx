@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { locate } from '../api.js'
 
-export default function Locating({ photo, onDone, onCancel }) {
+export default function Locating({ photo, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
   const [attempt, setAttempt] = useState(0)
@@ -18,12 +18,13 @@ export default function Locating({ photo, onDone, onCancel }) {
     // requestJson enforces its own ~8s timeout and returns a friendly, retryable
     // message; we only surface it. The controller cancels the in-flight /locate on
     // retake/unmount so a stale result never lands.
-    locate(photo.blob, { signal: controller.signal })
+    const locateRequest = api?.locate || locate
+    locateRequest(photo.blob, { signal: controller.signal })
       .then((r) => { if (live) onDone(r) })
       .catch((e) => {
         // Aborts come from retake/unmount only; that path unmounts us, so ignore it.
         if (!live || e?.name === 'AbortError') return
-        setError(e?.message || 'That took too long. Tap to try again.')
+        setError(e)
       })
 
     return () => {
@@ -31,7 +32,7 @@ export default function Locating({ photo, onDone, onCancel }) {
       clearTimeout(stageTimer)
       controller.abort() // never surface a stale result after retake/unmount
     }
-  }, [attempt]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [photo.blob, api, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <main className="rise flex flex-1 flex-col">
@@ -58,7 +59,7 @@ export default function Locating({ photo, onDone, onCancel }) {
           <p className="mt-2 text-muted">
             {stage === 'sending'
               ? 'Uploading your photo.'
-              : 'Comparing your photo to thousands of CDS hallway frames.'}
+              : `Comparing your photo to hallway views in ${buildingLabel}.`}
           </p>
           {/* Pulsing match meter: a live "working" rhythm, not a real progress value. */}
           <div className="mx-auto mt-6 flex max-w-[12rem] items-center justify-center gap-1.5" aria-hidden>
@@ -73,9 +74,10 @@ export default function Locating({ photo, onDone, onCancel }) {
         </div>
       ) : (
         <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">Hmm, no match yet</p>
-          <p className="mt-2 break-words text-sm text-muted">{error}</p>
-          <button onClick={() => setAttempt((a) => a + 1)} className="mt-6 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Try again</button>
+          <p className="font-display text-2xl font-bold">{error.code === 'unrecognized_location' ? 'We don’t recognize this spot' : 'Hmm, no match yet'}</p>
+          <p role="alert" className="mt-2 break-words text-sm text-muted">{error.message || 'Please try another photo.'}</p>
+          <button onClick={error.code === 'unrecognized_location' ? onCancel : () => setAttempt((a) => a + 1)} className="mt-6 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{error.code === 'unrecognized_location' ? 'Retake photo' : 'Try again'}</button>
+          <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
         </div>
       )}
 

@@ -8,7 +8,7 @@ function needsPicker(loc) {
   return loc.confidence < 0.6 || floors.size > 1
 }
 
-export default function Confirm({ photo, loc, onConfirm, onRetake }) {
+export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
@@ -27,7 +27,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
     setFailure(null)
     setSaving(spot)
     try {
-      const res = await correct(loc.photo_id, spot, { signal: controller.signal })
+      const res = await (api?.correct || correct)(loc.photo_id, spot, { signal: controller.signal })
       // Surface the new index size so the toast can read "N frames indexed".
       if (!controller.signal.aborted) onConfirm(spot, res?.index_size ?? true)
     } catch (error) {
@@ -128,6 +128,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake }) {
           <p className="text-center text-sm text-muted">Your pick teaches the app this spot for next time.</p>
         )}
         <button onClick={onRetake} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
+        <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
       </div>
     </main>
   )

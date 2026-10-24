@@ -3,41 +3,45 @@
 
 import { checkHealth, delay, requestJson } from './lib/request.js'
 
-const BASE = (import.meta.env?.VITE_API_URL || '').replace(/\/$/, '')
-export const MOCK = !BASE
-
-// locate accepts an optional AbortSignal so Locating can cancel the in-flight
-// request (on retake/unmount) and enforce its own ~8s timeout.
-export async function locate(blob, { signal } = {}) {
-  if (MOCK) return mockLocate(signal)
-  const fd = new FormData()
-  fd.append('image', blob, 'photo.jpg')
-  return requestJson(BASE + '/locate', { method: 'POST', body: fd, signal, operation: 'locate' })
+// Each building gets an immutable client. No global URL is changed during a
+// school switch, so in-flight corrections cannot cross into another backend.
+export function createApi(base = '') {
+  const BASE = base.replace(/\/$/, '')
+  const MOCK = !BASE
+  return {
+    MOCK,
+    async locate(blob, { signal } = {}) {
+      if (MOCK) return mockLocate(signal)
+      const fd = new FormData()
+      fd.append('image', blob, 'photo.jpg')
+      return requestJson(BASE + '/locate', { method: 'POST', body: fd, signal, operation: 'locate' })
+    },
+    async route({ from, to, accessible, heading }, { signal } = {}) {
+      if (MOCK) return mockRoute({ from, to, accessible }, signal)
+      const q = new URLSearchParams({ from, to, accessible: String(!!accessible) })
+      if (heading) q.set('heading', heading)
+      return requestJson(BASE + `/route?${q}`, { signal, operation: 'route' })
+    },
+    async correct(photo_id, true_spot, { signal } = {}) {
+      if (MOCK) return delay(300, { ok: true, index_size: 2214 }, signal)
+      return requestJson(BASE + '/correct', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo_id, true_spot }), signal, operation: 'correct',
+      })
+    },
+    async health() {
+      if (MOCK) return { ok: true, reachable: true, index_size: 2213, model: 'mock' }
+      return checkHealth(BASE + '/health')
+    },
+  }
 }
 
-export async function route({ from, to, accessible, heading }, { signal } = {}) {
-  if (MOCK) return mockRoute({ from, to, accessible }, signal)
-  const q = new URLSearchParams({ from, to, accessible: String(!!accessible) })
-  if (heading) q.set('heading', heading)
-  return requestJson(BASE + `/route?${q}`, { signal, operation: 'route' })
-}
-
-export async function correct(photo_id, true_spot, { signal } = {}) {
-  if (MOCK) return delay(300, { ok: true, index_size: 2214 }, signal)
-  return requestJson(BASE + '/correct', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ photo_id, true_spot }),
-    signal, operation: 'correct',
-  })
-}
-
-// Health has a longer timeout than other calls so a sleeping Hugging Face Space
-// has time to wake. MOCK reports a ready "mock" model so no status pill shows.
-export async function health() {
-  if (MOCK) return { ok: true, reachable: true, index_size: 2213, model: 'mock' }
-  return checkHealth(BASE + '/health')
-}
+const defaultApi = createApi(import.meta.env?.VITE_API_URL || '')
+export const MOCK = defaultApi.MOCK
+export const locate = defaultApi.locate
+export const route = defaultApi.route
+export const correct = defaultApi.correct
+export const health = defaultApi.health
 
 // ---------- mock data (ids taken from docs/contract.md examples) ----------
 let mockCalls = 0

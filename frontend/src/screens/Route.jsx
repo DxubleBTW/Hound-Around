@@ -32,7 +32,7 @@ function floorBadge(instruction = '') {
   return token
 }
 
-export default function Route({ from, heading, dest, accessible, onRestart }) {
+export default function Route({ from, heading, dest, accessible, onRestart, api }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -55,7 +55,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
     setI(0)
     setDir('fwd')
     const to = dest.trim()
-    const run = (opts) => route(opts, { signal: controller.signal })
+    const run = (opts) => (api?.route || route)(opts, { signal: controller.signal })
 
     run({ from, to, accessible, heading })
       .catch((e) => {
@@ -73,7 +73,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
         }
       })
     return () => { live = false; controller.abort() }
-  }, [from, dest, accessible, heading, requestKey, attempt])
+  }, [from, dest, accessible, heading, requestKey, attempt, api])
 
   // Short vibration on each step change, where supported and motion is allowed.
   useEffect(() => { if (data) tick(15) }, [i, data])
@@ -135,7 +135,7 @@ export default function Route({ from, heading, dest, accessible, onRestart }) {
   return (
     <main className={`${riseClass} flex flex-1 flex-col`}>
       <div className="mt-4 flex items-center justify-between text-sm">
-        <span className="font-medium text-muted">From {spotName(from)}</span>
+        <span className="font-medium text-muted">From {spotName(from) || from}</span>
         {accessible && <span className="rounded-full bg-ink/5 px-2.5 py-0.5 font-medium">♿ Elevators only</span>}
       </div>
       <h2 className="mt-1 font-display text-xl font-bold">To Room {dest}</h2>
