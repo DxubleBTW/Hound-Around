@@ -5,6 +5,27 @@ Last updated Sun Oct 25, 2026, by David. Read this first, then `CLAUDE.md`, `doc
 
 ## Live links
 
+### MegaLoc rollout, Sun Oct 25 (supersedes the older DINOv2 state below)
+
+- Production `/health` reports `gmberton/MegaLoc@5fe0dd697c4a+a0f34722c429+squash322`,
+  7,008 full-width single-view rows and all 57 existing locations. No PCA is applied.
+- Code and weights are pinned; PyTorch 2.6.0, torchvision 0.21.0 and Pillow 12.3.0
+  match the validated descriptor pipeline. The private dataset revision is pinned
+  with `HOUND_DATA_REVISION`; its default DINOv2 branch remains available for rollback.
+- Four live phone-photo requests, accessible routes and production-origin CORS passed.
+  Server `/locate` times were 626–733 ms on those four queries; these were confident
+  matches, not a latency measurement of OCR fallback or an accuracy test.
+- MegaLoc calibration was refit on 1,758 held-out-video queries using the production
+  room/graph data. With LOW/HIGH 0.5/0.7: automatic selection 63.4% (91.4% within
+  10 m on the correct floor), picker 22.8%, second-photo 13.8%, simulated user success
+  84.1%. This is internal footage evaluation, not independent-user validation.
+- Backend tests: 172 passed. Live corrections were not modified during verification;
+  correction was exercised on an isolated local backend. Rejection remains unconfigured.
+- Rollback: restore the previous Space commit, whose Dockerfile uses the original
+  DINOv2 dataset branch. The exact before/after revisions are recorded privately.
+
+### Earlier deployment history
+
 | What | Where | State |
 | --- | --- | --- |
 | Front end | https://www.hound-around.tech (also hound-around-theta.vercel.app) | Up on the **real backend** with the dark wayfinding UI (PR #23); Vercel deploys `main` |

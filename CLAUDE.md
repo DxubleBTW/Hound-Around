@@ -71,7 +71,9 @@ Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it befo
   `calibrate.py`). Report top-1 / top-3 / floor and n on the same query set as the baseline.
 - These numbers describe our own footage; outsider photos are the presentable test set. Never tune on them.
   Slides and video use measured numbers only.
-- Next model step: MegaLoc (place-recognition descriptor) beat DINOv2 on the same query set (n=1758, LOVO:
-  top-1 36.8 → 48.2%, top-3 59.5 → 74.9%, floor 81.2 → 89.4%). The code path is in (`HOUND_EMBEDDER`, PCA in
-  the index); still to do before it ships: pick cap/PCA size, CPU latency on 2 threads (/locate ≈ 1 s incl.
-  OCR), rebuild index + headings, refit `ml/calibration.py`, upload code + index together, smoke-test.
+- MegaLoc is deployed (see the latest section of docs/STATUS.md). It beat DINOv2 on the same query set (n=1758, LOVO:
+  top-1 36.8 → 48.2%, top-3 59.5 → 74.9%, floor 81.2 → 89.4%). Production uses pinned code/weights,
+  square whole-image single views, full-width descriptors, and its own confidence calibration.
+  The Space Dockerfile selects MegaLoc and pins the private data revision; repository defaults still allow DINOv2.
+  Refit calibration before enabling any PCA variant. Four live confident matches took 626–733 ms;
+  OCR fallback latency and independent-user accuracy remain separate checks.

@@ -172,7 +172,7 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
     np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr,
              views_per_frame=len(view_spec), model_name=getattr(embed_fn, 'model_name', ''), **extra)
 
-    _report(counts)
+    _report(counts, views_per_frame=len(view_spec))
     return out_path, counts
 
 
@@ -230,13 +230,13 @@ def add_headings(data_dir, index_path=None, cap=CAP_PER_SPOT):
     return index_path
 
 
-def _report(counts):
+def _report(counts, views_per_frame=len(INDEX_VIEWS)):
     print('Per-spot frame counts:')
     for spot in sorted(counts):
         print(f'  {spot}: {counts[spot]}')
     refilm = sorted(s for s, c in counts.items() if c < REFILM_THRESHOLD)
     total = sum(counts.values())
-    print(f'Total frames indexed: {total} ({total * len(INDEX_VIEWS)} rows) across {len(counts)} spots')
+    print(f'Total frames indexed: {total} ({total * views_per_frame} rows) across {len(counts)} spots')
     if refilm:
         print(f'Re-film list (< {REFILM_THRESHOLD} frames): {", ".join(refilm)}')
     else:
