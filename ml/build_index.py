@@ -134,12 +134,13 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
         embed_fn = make_embedder()
 
     headings = frame_headings(data_dir)
+    view_spec = getattr(embed_fn, 'index_views', INDEX_VIEWS)
     vecs_parts, labels, row_headings, counts = [], [], [], {}
     dim = getattr(embed_fn, 'dim', None)
     for spot, frames in index_frames(data_dir, valid_nodes, cap, exclude_videos):
         images = [Image.open(f).convert('RGB') for f in frames]
         try:
-            views = [view for image in images for view in index_views(image)]
+            views = [view for image in images for view in index_views(image, view_spec)]
             vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(len(views), -1)
             if dim is None:
                 dim = vectors.shape[1]
@@ -150,7 +151,7 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
                 image.close()
         vecs_parts.append(normalize(vectors))
         labels.extend([spot] * vectors.shape[0])
-        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in view_spec)
         counts[spot] = len(frames)
 
     projector = None
@@ -168,7 +169,8 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
 
     out_path = Path(out_path) if out_path else data_dir / 'index.npz'
     extra = projector.npz_fields() if projector is not None else {}
-    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr, **extra)
+    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr,
+             views_per_frame=len(view_spec), model_name=getattr(embed_fn, 'model_name', ''), **extra)
 
     _report(counts)
     return out_path, counts
@@ -213,11 +215,12 @@ def add_headings(data_dir, index_path=None, cap=CAP_PER_SPOT):
     graph = json.loads((data_dir / 'graph.json').read_text())
     valid_nodes = {n['id'] for n in graph.get('nodes', []) if n.get('floor') in VALID_FLOORS}
     headings = frame_headings(data_dir)
+    data = dict(np.load(index_path, allow_pickle=False))
+    views_per_frame = int(data.get('views_per_frame', len(INDEX_VIEWS)))
     labels, row_headings = [], []
     for spot, frames in index_frames(data_dir, valid_nodes, cap):
-        labels.extend([spot] * len(frames) * len(INDEX_VIEWS))
-        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
-    data = dict(np.load(index_path, allow_pickle=False))
+        labels.extend([spot] * len(frames) * views_per_frame)
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in range(views_per_frame))
     if [str(x) for x in data['labels']] != labels:
         raise ValueError('Index rows do not match the manifests; rebuild the index instead')
     data['heading'] = np.asarray(row_headings, dtype='U')

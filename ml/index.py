@@ -34,7 +34,8 @@ class VectorIndex:
     they are persisted as float16 to match the contract.
     """
 
-    def __init__(self, vecs=None, labels=None, source=None, heading=None, pca=None, dim=None):
+    def __init__(self, vecs=None, labels=None, source=None, heading=None, pca=None, dim=None,
+                 model_name='', views_per_frame=len(INDEX_VIEWS)):
         if vecs is None:
             vecs = np.zeros((0, dim or (pca.out_dim if pca else DIM)), dtype=np.float32)
         vecs = np.asarray(vecs, dtype=np.float32)
@@ -44,6 +45,8 @@ class VectorIndex:
         self.dim = int(vecs.shape[1])
         # The PCA that produced these rows (queries must go through the same one), or None.
         self.pca = pca
+        self.model_name = model_name
+        self.views_per_frame = int(views_per_frame)
         if pca is not None and pca.out_dim != self.dim:
             raise ValueError(f'Index is {self.dim}-d but its PCA projects to {pca.out_dim}-d')
         self.labels = list(labels or [])
@@ -67,6 +70,8 @@ class VectorIndex:
             source=[str(x) for x in data['source']],
             heading=[str(x) for x in data['heading']] if 'heading' in data.files else None,
             pca=Projector.from_npz(data),
+            model_name=str(data['model_name']) if 'model_name' in data.files else '',
+            views_per_frame=int(data['views_per_frame']) if 'views_per_frame' in data.files else len(INDEX_VIEWS),
         )
 
     def save(self, path) -> None:
@@ -80,6 +85,7 @@ class VectorIndex:
             heading=np.asarray(self.heading, dtype=object).astype('U') if self.heading
             else np.zeros((0,), dtype='U1'),
             **(self.pca.npz_fields() if self.pca is not None else {}),
+            model_name=self.model_name, views_per_frame=self.views_per_frame,
         )
 
     # -- correction / snapshot -------------------------------------------
@@ -90,12 +96,14 @@ class VectorIndex:
             raise ValueError(f'Correction vector must be {self.dim}-d')
         vecs = np.vstack([self.vecs, vector[None, :]]).astype(np.float32)
         return VectorIndex(vecs=vecs, labels=self.labels + [label],
-                           source=self.source + [source], heading=self.heading + [''], pca=self.pca)
+                           source=self.source + [source], heading=self.heading + [''], pca=self.pca,
+                           model_name=self.model_name, views_per_frame=self.views_per_frame)
 
     def copy(self) -> 'VectorIndex':
         """Deep copy; snapshots must not alias arrays that later mutate."""
         return VectorIndex(vecs=self.vecs.copy(), labels=list(self.labels),
-                           source=list(self.source), heading=list(self.heading), pca=self.pca)
+                           source=list(self.source), heading=list(self.heading), pca=self.pca,
+                           model_name=self.model_name, views_per_frame=self.views_per_frame)
 
     # -- retrieval / voting ----------------------------------------------
     def vote(self, query, k=10, mask=None, return_rows=False):
@@ -113,7 +121,9 @@ class VectorIndex:
         rows = np.arange(len(self)) if mask is None else np.flatnonzero(mask)
         if len(rows) == 0:
             return ([], [], []) if return_rows else ([], [])
-        sims = self.vecs[rows] @ query  # vectors already normalized -> cosine.
+        # Full-width MegaLoc rows are large: avoid copying the whole index on
+        # every unmasked query. Masked OCR votes still select their floor rows.
+        sims = (self.vecs if mask is None else self.vecs[rows]) @ query
         k = min(k, len(rows))
         # Highest similarities first; on equal similarity a correction sorts
         # ahead of video rows, so a corrected copy of a frame that many video

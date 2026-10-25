@@ -175,7 +175,7 @@ class Backend:
 
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
         span = len({self._floor.get(t['spot']) for t in top3}) > 1
-        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote))
+        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote), self.model_name)
         result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows)
         return {**result, 'p_correct': round(p, 3), 'tier': calibration.tier(p, span)}
 
@@ -323,6 +323,8 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
     # to every query; without one, the embedder must already match. Fail closed:
     # a width mismatch would make every vote meaningless.
     base_name = getattr(embed_fn, 'model_name', MODEL_NAME)
+    if index.model_name and index.model_name != base_name:
+        raise ValueError('Index descriptor identity does not match HOUND_EMBEDDER; rebuild the index')
     embed_dim = getattr(embed_fn, 'dim', None)
     if embed_dim is None:  # older embedders: measure once on a tiny image
         from PIL import Image
@@ -333,6 +335,7 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
                          f'set HOUND_EMBEDDER to the model the index was built with, or rebuild it')
     embed_fn = with_projection(embed_fn, index.pca)
     model_name = projected_model_name(base_name, index.pca)
+    calibration.coefficients(model_name)  # refuse an uncalibrated MegaLoc variant at startup
     return Backend(index, graph, headings, embed_fn, ocr_reader=reader,
                    model_name=model_name, top_k=top_k,
                    min_similarity=load_threshold(data_dir, index_path, model_name),

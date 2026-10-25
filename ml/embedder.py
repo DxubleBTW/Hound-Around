@@ -50,9 +50,11 @@ PAD_RGB = (124, 116, 104)  # ImageNet mean: padding normalizes to ~0
 
 # --- MegaLoc ------------------------------------------------------------------
 MEGALOC_HUB = 'gmberton/MegaLoc'
+MEGALOC_REVISION = '5fe0dd697c4a70ba3e23607f6716ab3c606b16db'
+MEGALOC_WEIGHTS_REVISION = 'a0f34722c4297ff787e022433799250180860af7'
 MEGALOC_DIM = 8448
 MEGALOC_SIDE = 322  # trained on 322 x 322 squares
-MEGALOC_MODEL_NAME = f'{MEGALOC_HUB}+squash{MEGALOC_SIDE}'
+MEGALOC_MODEL_NAME = f'{MEGALOC_HUB}@{MEGALOC_REVISION[:12]}+{MEGALOC_WEIGHTS_REVISION[:12]}+squash{MEGALOC_SIDE}'
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -121,11 +123,11 @@ def squash(image, side=MEGALOC_SIDE):
     return image.resize((side, side), Image.BICUBIC)
 
 
-def index_views(image):
+def index_views(image, views=INDEX_VIEWS):
     """The :data:`INDEX_VIEWS` crops of one training frame, in order."""
     width, height = image.size
     return [image if view is None else image.crop((int(width * view[0]), 0, int(width * view[1]), height))
-            for view in INDEX_VIEWS]
+            for view in views]
 
 
 def _is_single(images) -> bool:
@@ -182,15 +184,25 @@ class MegalocEmbedder:
 
     model_name = MEGALOC_MODEL_NAME
     dim = MEGALOC_DIM
+    index_views = (None,)
 
     def __init__(self, device: str | None = None, batch: int = 16, threads: int | None = None):
         import torch  # noqa: WPS433 (lazy heavy import)
 
         self._torch = torch
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        if threads:
-            torch.set_num_threads(threads)
-        self._model = torch.hub.load(MEGALOC_HUB, 'get_trained_model', trust_repo=True).to(self.device).eval()
+        torch.set_num_threads(threads or 2)
+        from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
+
+        # Construct the pinned architecture without the upstream entry point's
+        # unversioned weights download. Both revisions define the descriptor.
+        self._model = torch.hub.load(f'{MEGALOC_HUB}:{MEGALOC_REVISION}', 'MegaLoc',
+                                     trust_repo=True, skip_validation=True)
+        weights = hf_hub_download('gberton/MegaLoc', 'model.safetensors',
+                                  revision=MEGALOC_WEIGHTS_REVISION)
+        self._model.load_state_dict(load_file(weights))
+        self._model = self._model.to(self.device).eval()
         self._mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(3, 1, 1)
         self._std = torch.tensor(IMAGENET_STD, device=self.device).view(3, 1, 1)
         self.batch = batch

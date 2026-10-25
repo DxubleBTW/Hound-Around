@@ -61,6 +61,15 @@ def test_embedder_selection_defaults_to_dinov2(monkeypatch):
     assert MEGALOC_DIM == 8448 and DIM == 384
 
 
+def test_megaloc_calibration_is_bound_to_the_measured_descriptor():
+    from ml import calibration
+    from ml.embedder import MEGALOC_MODEL_NAME
+    features = dict(confidence=.7, share=.6, top_sim=.8, margin=.1, span=0)
+    assert calibration.p_correct(features, MEGALOC_MODEL_NAME) != calibration.p_correct(features)
+    with pytest.raises(ValueError, match='calibration'):
+        calibration.coefficients(MEGALOC_MODEL_NAME + '+pca1024')
+
+
 # --- index width follows the data --------------------------------------------
 
 def test_index_width_is_read_from_the_vectors(tmp_path):
@@ -159,6 +168,25 @@ def test_backend_fails_closed_on_width_mismatch(tmp_path):
     build_index(tmp_path, embed_fn=WideFakeEmbedder(), cap=60)
     with pytest.raises(ValueError, match='HOUND_EMBEDDER'):
         create_backend(tmp_path, embedder=FakeEmbedder(), ocr_reader=lambda image: (None, None))  # 384-d vs 16-d index
+
+
+def test_single_view_index_preserves_descriptor_identity(tmp_path):
+    from ml.build_index import build_index, add_headings
+
+    _write_dataset(tmp_path)
+    embedder = WideFakeEmbedder()
+    embedder.index_views = (None,)
+    path, counts = build_index(tmp_path, embed_fn=embedder)
+    index = VectorIndex.load(path)
+    assert len(index) == sum(counts.values())
+    assert index.views_per_frame == 1
+    assert index.model_name == embedder.model_name
+    add_headings(tmp_path)
+    index.copy().save(path)
+    assert VectorIndex.load(path).views_per_frame == 1
+    embedder.model_name = 'another-model-same-width'
+    with pytest.raises(ValueError, match='identity'):
+        create_backend(tmp_path, embedder=embedder, ocr_reader=lambda image: (None, None))
 
 
 # --- API keeps the width it is given ------------------------------------------

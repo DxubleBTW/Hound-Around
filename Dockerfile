@@ -24,7 +24,7 @@ COPY requirements.txt requirements-core.txt ./
 # rest of the runtime deps from requirements.txt (both already satisfied). torchvision
 # must come from the CPU index too: easyocr needs it, and a PyPI torchvision whose torch
 # pin doesn't match would make pip swap in the ~2 GB CUDA torch.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt \
     && useradd --create-home --uid 1000 app \
     && mkdir -p /app/data /app/caches/hf /app/caches/easyocr /app/caches/torch \
