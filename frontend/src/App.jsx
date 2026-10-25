@@ -17,6 +17,7 @@ import ThemeSwitch from './components/ThemeSwitch.jsx'
 import { createApi } from './api.js'
 import { buildingConfig } from './lib/campuses.js'
 import { motionPaused, setMotionPaused } from './lib/motion.js'
+import { useReducedMotion } from './lib/useReducedMotion.js'
 import CampusPicker from './screens/CampusPicker.jsx'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
@@ -36,11 +37,12 @@ export default function App() {
   const [choosing, setChoosing] = useState(false)
   const [opening, setOpening] = useState(shouldShowOpening)
   const [paused, setPaused] = useState(motionPaused)
+  const reduced = useReducedMotion()
   const building = buildingConfig(selection.school, selection.building, env)
   const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
 
   useEffect(() => { setMotionPaused(paused) }, [paused])
-  const motion = { paused, toggle: () => setPaused((p) => !p) }
+  const motion = { paused, systemReduced: reduced && !paused, toggle: () => setPaused((p) => !p) }
 
   let body
   if (choosing || !building?.available) {
@@ -168,6 +170,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
           </button>
         </div>
       </header>
+      {motion.systemReduced && <p role="status" className="mt-1 text-sm text-mist">Animations are reduced by your device’s motion setting.</p>}
       <PlacesMenu open={placesOpen} onClose={() => setPlacesOpen(false)} groups={building.destinationGroups || []}
         selected={building.resolvePlace(dest)} onPick={setDest} />
 

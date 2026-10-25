@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds, points, project, render } from '../lib/box3d.js'
 import { STREET, STREET_VIEWBOX, STREET_YAW } from '../lib/cdsModel.js'
 import { ABOVE, floorModel, inOut, mix, mixObj } from '../lib/floorModel.js'
@@ -20,11 +20,14 @@ const HERE = '#CC0000'
 
 export default function BuildingIntro({ floors, here, to, caption = '', still = false, onDone }) {
   const [clock, setClock] = useState(still ? OPEN_MS + PULL_MS : 0)
+  const doneCallback = useRef(onDone)
+  doneCallback.current = onDone
   useEffect(() => {
+    setClock(still ? OPEN_MS + PULL_MS : 0)
     let raf = 0
     let start = 0
     let done = false
-    const finish = () => { if (!done) { done = true; onDone() } }
+    const finish = () => { if (!done) { done = true; doneCallback.current() } }
     // Backstop: if animation frames stall (a hidden tab), still hand off to the route.
     const backstop = setTimeout(finish, still ? STILL_MS : TOTAL_MS + 1500)
     const tick = (now) => {
@@ -36,7 +39,7 @@ export default function BuildingIntro({ floors, here, to, caption = '', still = 
     }
     if (!still) raf = requestAnimationFrame(tick)
     return () => { done = true; cancelAnimationFrame(raf); clearTimeout(backstop) }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [still])
 
   const t = inOut(Math.min(1, clock / OPEN_MS))
   const pull = inOut(Math.min(1, Math.max(0, (clock - OPEN_MS) / PULL_MS)))

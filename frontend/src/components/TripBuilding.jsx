@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { bounds, points, project, render } from '../lib/box3d.js'
 import { ABOVE, floorModel } from '../lib/floorModel.js'
-import { prefersReducedMotion } from '../lib/motion.js'
+import { useReducedMotion } from '../lib/useReducedMotion.js'
 
 // Your trip through CDS, on the same 3D drawing as the home screen and the
 // manual locator: the building opened into its floors, seen from above. The
@@ -14,7 +14,7 @@ const EXPLODE = 0.75
 
 export default function TripBuilding({ floors, here, to, ride = null, label = '' }) {
   const [p, setP] = useState(1)
-  const still = prefersReducedMotion()
+  const still = useReducedMotion()
   // The ride loops: up (or down) the shaft, a short pause at the new floor.
   useEffect(() => {
     if (!ride || still) { setP(1); return undefined }

@@ -3,7 +3,8 @@ import { route } from '../api.js'
 import { floorName, floorOf, spotName } from '../lib/spots.js'
 import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
-import { prefersReducedMotion, tick } from '../lib/motion.js'
+import { tick } from '../lib/motion.js'
+import { useReducedMotion } from '../lib/useReducedMotion.js'
 import { compactSteps } from '../lib/steps.js'
 import { directionsShown, exitLabel, passesText, setDirectionsShown, stepsByLeg, turnMarks, usableLegs } from '../lib/legs.js'
 import PawBurst from '../components/PawBurst.jsx'
@@ -119,7 +120,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, onRe
   const resolvedDest = resolvePlace(dest)
   const requestKey = JSON.stringify([from, resolvedDest, accessible, heading])
   const data = response?.key === requestKey ? response.data : null
-  const reduced = prefersReducedMotion()
+  const reduced = useReducedMotion()
 
   // Advancing slides the next sign in from the right; going Back slides it in
   // from the left. Reduced-motion users get the static state.
@@ -477,7 +478,7 @@ function FloorHero({ from, to, dir }) {
 // implies an absolute building bearing — only "your next move is this way". The
 // subtle nudge animation is gated by reduced motion via index.css.
 function DirectionArrow({ kind, dir = '', aria = '' }) {
-  const reduced = prefersReducedMotion()
+  const reduced = useReducedMotion()
   // For vertical steps, resolve to an explicit up/down arrow when we know which
   // way; otherwise fall back to the elevator/stairs glyph.
   const arrowKind = isVertical(kind) ? (dir === 'up' ? 'up' : dir === 'down' ? 'down' : kind) : kind
