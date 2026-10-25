@@ -28,7 +28,7 @@ function floorMark(spot) {
 
 const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px] disabled:text-dim'
 
-export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building' }) {
+export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
@@ -90,7 +90,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
             <img src={photo.url} alt="" className="h-24 w-[72px] shrink-0 rounded-[2px] object-cover" />
             <div className="min-w-0">
               <p className="text-sm text-mist">You’re at</p>
-              <h2 className="font-display text-[32px] font-semibold leading-[1.05]">{spotName(loc.spot)}</h2>
+              <h2 className="font-display text-[32px] font-semibold leading-[1.05]">{spotName(loc.spot, roomLabels)}</h2>
               <span className="mt-2 inline-flex rounded-[3px] bg-maroon px-2 py-0.5 text-sm font-bold">{floorName(loc.floor)}</span>
             </div>
           </div>
@@ -121,7 +121,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
                     className={`press relative flex min-h-[76px] w-full items-center gap-3.5 overflow-hidden rounded-sm px-3.5 text-left disabled:opacity-60 ${first ? 'bg-snow text-night' : 'bg-wine text-snow'}`}>
                     <span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[3px] bg-maroon font-display text-[21px] font-semibold text-snow">{floorMark(t.spot)}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[17px] font-bold leading-snug">{spotName(t.spot)}</span>
+                      <span className="block text-[17px] font-bold leading-snug">{spotName(t.spot, roomLabels)}</span>
                       <span className={`block text-sm ${first ? 'text-[#4A4A4A]' : 'text-mist'}`}>
                         {saving === t.spot ? 'Saving…' : `${floorName(floorOf(t.spot).code === 'B1' ? -1 : Number(floorMark(t.spot)))}${first ? '. Closest match.' : ''}`}
                       </span>
@@ -149,7 +149,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
             )}
             <button onClick={() => onConfirm(failure.spot, null)} disabled={!!saving}
               className="press min-h-[48px] w-full rounded-sm bg-snow font-display text-[17px] font-semibold text-night disabled:opacity-60">
-              Continue from {spotName(failure.spot)}
+              Continue from {spotName(failure.spot, roomLabels)}
             </button>
           </div>
         )}

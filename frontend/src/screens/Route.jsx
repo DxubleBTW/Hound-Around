@@ -90,7 +90,7 @@ const lowerFirst = (s = '') => s.charAt(0).toLowerCase() + s.slice(1)
 
 const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px]'
 
-export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination }) {
+export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination, roomLabels = {} }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -148,7 +148,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
       <main className="flex flex-1 flex-col pt-8">
         <div className="flex flex-1 flex-col justify-center gap-3">
           <h2 className="font-display text-[36px] font-semibold leading-[1.02]">
-            {error.unknownDest ? 'We can’t find that place' : `No route to ${destinationLabel(resolvedDest)} yet`}
+            {error.unknownDest ? 'We can’t find that place' : `No route to ${destinationLabel(resolvedDest, roomLabels)} yet`}
           </h2>
           <p role="alert" className="text-[17px] leading-snug text-mist">{error.message}</p>
         </div>
@@ -181,8 +181,8 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   const remaining = Math.round(steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0))
   const mins = Math.max(1, Math.round((data.est_seconds * (remaining / (data.total_meters || 1))) / 60))
   const floorChangeAhead = steps.slice(i).some((s) => isVertical(stepKind(s.instruction)))
-  const destText = destinationLabel(resolvedDest)
-  const fromText = destinationLabel(from) || spotName(from) || from
+  const destText = destinationLabel(resolvedDest, roomLabels)
+  const fromText = destinationLabel(from, roomLabels) || spotName(from, roomLabels) || from
   const floorHere = step ? stepFloorName(step.node) : ''
 
   // Words on the sign. A walking step leads with the plain move and the reworded
@@ -198,17 +198,17 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
       stairDir = verticalDir(step.node, step.instruction)
       const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
       move = moveLabel(kind, levelName)
-      const toward = prettifyLandmark(headingToward(step.instruction))
+      const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
       detail = toward ? `toward ${lowerFirst(toward)}` : ''
     } else {
       move = kind ? moveLabel(kind) : ''
-      const toward = prettifyLandmark(headingToward(step.instruction))
-      detail = toward ? `toward ${lowerFirst(toward)}` : prettifyLandmark(step.instruction)
+      const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
+      detail = toward ? `toward ${lowerFirst(toward)}` : prettifyLandmark(step.instruction, roomLabels[step.node])
     }
   }
   const nextStep = steps[i + 1]
   const nextKind = nextStep ? stepKind(nextStep.instruction) : null
-  const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction)) : ''
+  const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction), roomLabels[nextStep.node]) : ''
   const last = i === steps.length - 1
   const meters = step?.meters > 0 ? Math.max(1, Math.round(step.meters)) : 0
   const tapHint = last ? 'Tap when you arrive' : vertical ? 'Tap when you’re out' : 'Tap when you’re there'
@@ -231,7 +231,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
           {vertical && badge && <FloorHero from={shortFloor(floorOf(step.node).code)} to={shortFloor(badge)} dir={stairDir} />}
 
           <button key={i} onClick={() => go(i + 1)}
-            aria-label={`Sign ${i + 1} of ${steps.length}. ${prettifyLandmark(step.instruction)}.${meters ? ` About ${meters} metres.` : ''} ${tapHint}.`}
+            aria-label={`Sign ${i + 1} of ${steps.length}. ${prettifyLandmark(step.instruction, roomLabels[step.node])}.${meters ? ` About ${meters} metres.` : ''} ${tapHint}.`}
             className={`${signAnim} press block w-full overflow-hidden rounded-[3px] bg-snow text-left text-night`}>
             <span className="flex justify-between bg-maroon px-4 py-2.5 text-sm font-bold text-snow">
               <span>Sign {i + 1} of {steps.length}</span>

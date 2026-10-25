@@ -43,21 +43,24 @@ def probe(video):
     return stream.get("color_transfer", ""), float(info["format"]["duration"])
 
 
-def extract(video, frames_root, srt_root):
+def transcribe(video, srt_path):
+    srt_path.parent.mkdir(parents=True, exist_ok=True)
+    # The whisper filter can't take Windows drive paths in its options, so run it from the model's folder
+    srt_rel = os.path.relpath(srt_path.resolve(), MODEL.parent).replace("\\", "/")
+    subprocess.run([FFMPEG, "-v", "error", "-i", str(video.resolve()), "-vn", "-af",
+                    f"aresample=16000,whisper=model={MODEL.name}:language=en:queue=3:destination={srt_rel}:format=srt",
+                    "-f", "null", "-"], check=True, cwd=MODEL.parent)
+
+
+def extract(video, frames_root, srt_root, width=720):
     name = video.stem
     transfer, duration = probe(video)
-    vf = "fps=2,scale=720:-2" + ("," + TONEMAP if transfer == "arib-std-b67" else "")
+    vf = f"fps=2,scale={width}:-2" + ("," + TONEMAP if transfer == "arib-std-b67" else "")
     out_dir = frames_root / name
     out_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run([FFMPEG, "-v", "error", "-y", "-i", str(video), "-vf", vf, "-q:v", "3",
                     str(out_dir / f"{name}_%04d.jpg")], check=True)
-
-    srt_root.mkdir(parents=True, exist_ok=True)
-    # The whisper filter can't take Windows drive paths in its options, so run it from the model's folder
-    srt_rel = os.path.relpath(srt_root / f"{name}.srt", MODEL.parent).replace("\\", "/")
-    subprocess.run([FFMPEG, "-v", "error", "-i", str(video.resolve()), "-vn", "-af",
-                    f"aresample=16000,whisper=model={MODEL.name}:language=en:queue=3:destination={srt_rel}:format=srt",
-                    "-f", "null", "-"], check=True, cwd=MODEL.parent)
+    transcribe(video, srt_root / f"{name}.srt")
     frames = len(list(out_dir.glob("*.jpg")))
     print(f"{name}: {duration:.0f}s, {'HDR tone-mapped, ' if vf.endswith('yuv420p') else ''}{frames} frames")
 
@@ -67,12 +70,14 @@ def main():
     ap.add_argument("inputs", nargs="+", type=Path)
     ap.add_argument("--out", type=Path, default=Path("data/frames"))
     ap.add_argument("--srt", type=Path, default=Path("data/transcripts"))
+    # 360 video: keep full resolution (e.g. 3840) so split_360.py crops still have ~720 px of detail
+    ap.add_argument("--width", type=int, default=720)
     args = ap.parse_args()
     videos = []
     for p in args.inputs:
         videos += sorted(v for v in p.iterdir() if v.suffix.lower() in VIDEO_EXT) if p.is_dir() else [p]
     for v in videos:
-        extract(v, args.out.resolve(), args.srt.resolve())
+        extract(v, args.out.resolve(), args.srt.resolve(), args.width)
 
 
 if __name__ == "__main__":

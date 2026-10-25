@@ -27,8 +27,13 @@ function matchCase(sourceWord, target) {
 // Prettify a user-facing instruction or landmark string for DISPLAY only.
 // Applies the word rewrites above with word boundaries so neighbouring words are
 // never mangled. Non-string / empty input passes through as an empty string.
-export function prettifyLandmark(text = '') {
+export function prettifyLandmark(text = '', roomLabel = '') {
   let out = String(text || '')
+  // Older backend graph labels can still include seating capacities. Strip the
+  // capacity for display without inventing a door number or changing turn words.
+  const physicalRoom = typeof roomLabel === 'string' && /^Room B?\d{2,3}[A-Z]?$/i.test(roomLabel) ? roomLabel : ''
+  out = out.replace(/\b\d+\s*[-–]?\s*(?:seat(?:er)?|person)\s+(classrooms?|rooms?)(?:\s+(?:[A-C]|west|middle|east)(?=\s*(?:[·,(]|$)))?/gi,
+    (_, noun) => physicalRoom || noun)
   for (const { from, to } of WORD_REWRITES) {
     const re = new RegExp(`\\b${from}\\b`, 'gi')
     out = out.replace(re, (word) => matchCase(word, to))

@@ -180,6 +180,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
             onManual={chooseStart}
             api={api}
             buildingLabel={building.shortName || building.name}
+            roomLabels={building.roomLabels}
           />
         )}
         {screen === 'manual' && (
@@ -192,6 +193,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
             onRestart={restart}
             api={api}
             resolvePlace={building.resolvePlace}
+            roomLabels={building.roomLabels}
           />
         )}
       </div>
