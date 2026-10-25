@@ -97,7 +97,7 @@ def test_locate_contract_shape():
     backend = build(index)
     result = backend.locate(solid(red))
     assert set(result) == {'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'vector'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'vector'}
     assert result['spot'] == 'F1_a'
     assert result['floor'] == 1
     vector = np.asarray(result['vector'], dtype=np.float32)
@@ -287,7 +287,7 @@ def test_wrong_floor_lookalike_is_corrected_by_ocr_floor():
     assert backend._floor[result['spot']] == result['floor']  # API invariant
     assert 0.0 <= result['confidence'] <= 1.0
     assert set(result) == {'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'vector'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'vector'}
 
 
 def test_ocr_room_resolved_via_rooms_json_sets_floor_without_numeral():
@@ -457,7 +457,7 @@ def test_create_app_with_backend(tmp_path, monkeypatch):
         body = response.json()
         # API strips the internal vector and diagnostics.
         assert set(body) == {'photo_id', 'spot', 'floor', 'heading', 'confidence',
-                             'top3', 'ocr_room', 'ocr_floor', 'ms'}
+                             'top3', 'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'ms'}
         assert body['spot'] == 'F1_a'
         assert body['floor'] == 1
 
@@ -607,3 +607,42 @@ def test_index_views_are_whole_frame_plus_overlapping_side_crops():
     from ml.embedder import index_views
     views = index_views(Image.new('RGB', (1000, 500)))
     assert [v.size for v in views] == [(1000, 500), (600, 500), (600, 500)]
+
+
+# --- calibrated tiers and the second photo -----------------------------------
+
+def test_calibrated_tiers():
+    from ml import calibration
+    assert calibration.tier(0.9, span=False) == 'auto'
+    # Sure but the top 3 disagree on the floor: confirm, don't auto-pick.
+    assert calibration.tier(0.9, span=True) == 'picker'
+    assert calibration.tier(0.6, span=False) == 'picker'
+    assert calibration.tier(0.3, span=False) == 'second'
+    base = {'confidence': 0.5, 'share': 0.5, 'top_sim': 0.8, 'margin': 0.05, 'span': 0.0}
+    assert calibration.p_correct({**base, 'margin': 0.2}) > calibration.p_correct(base)
+    assert calibration.p_correct({**base, 'span': 1.0}) < calibration.p_correct(base)
+
+
+def test_locate_reports_p_correct_and_tier():
+    red, green = (255, 0, 0), (0, 128, 0)
+    index = make_index([(red, 'F1_a', 'video')] * 10 + [(green, 'F2_c', 'video')])
+    result = build(index).locate(solid(red))
+    assert 0 <= result['p_correct'] <= 1
+    assert result['tier'] in ('auto', 'picker', 'second')
+
+
+def test_second_photo_adds_both_votes():
+    red, green = (255, 0, 0), (0, 128, 0)
+    # The first photo splits between two floors; the second photo, facing the
+    # other way, is clearly F2_c.
+    index = make_index([(red, 'F1_a', 'video')] * 6 + [(red, 'F2_c', 'video')] * 4
+                       + [(green, 'F2_c', 'video')] * 10)
+    backend = build(index)
+    single = backend.locate(solid(red))
+    assert single['spot'] == 'F1_a'
+    fused = backend.locate(solid(red), previous=COLOR_VEC[green])
+    assert fused['spot'] == 'F2_c' and fused['floor'] == 2
+    assert fused['top3'] == [{'spot': 'F2_c', 'votes': 14}, {'spot': 'F1_a', 'votes': 6}]
+    # After two photos the user confirms on the fused top 3; never a third photo.
+    assert fused['tier'] == 'picker' and fused['p_correct'] is None
+    assert 0 <= fused['confidence'] <= 1

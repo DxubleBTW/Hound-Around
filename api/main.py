@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import sqlite3
 from threading import RLock
 import time
@@ -89,6 +90,10 @@ class MatchResult(BaseModel):
     top3: list[Vote] = Field(min_length=1, max_length=3)
     ocr_room: str | None
     ocr_floor: Literal[-1, 1, 2] | None
+    # Calibrated P(right spot) and what the app should do next (ml/calibration.py).
+    # Null from backends without calibration; the app then uses `confidence`.
+    p_correct: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    tier: Literal['auto', 'picker', 'second'] | None = None
 
 
 def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
@@ -210,7 +215,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                                  'model': model.model_name if model else 'unconfigured'},
                                 status_code=200 if ready else 503)
 
-    def locate(raw):
+    def locate(raw, previous_id=None):
         started = time.perf_counter()
         try:
             with warnings.catch_warnings():
@@ -232,8 +237,14 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                 model = state['matcher']
                 if model is None or state['router'] is None:
                     raise HTTPException(503, 'Recognition data not ready')
+                prune()
+                # Second photo of the same spot: fuse with the first photo's
+                # vector (kept for corrections). An expired id falls back to a
+                # single-photo answer rather than an error.
+                previous = cache.get(previous_id) if previous_id else None
                 try:
-                    result = dict(model.locate(image))
+                    result = dict(model.locate(image, previous=previous['vector'].copy())
+                                  if previous else model.locate(image))
                 except UnrecognizedLocation:
                     raise HTTPException(422, {
                         'code': 'unrecognized_location',
@@ -246,7 +257,8 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                 vector = (vector / norm).astype(np.float32)
                 # Enforce the public contract even if the ML result has diagnostics.
                 fields = ('spot', 'floor', 'heading', 'confidence', 'top3', 'ocr_room', 'ocr_floor')
-                result = MatchResult(**{field: result[field] for field in fields}).model_dump()
+                result = MatchResult(**{field: result[field] for field in fields},
+                                     p_correct=result.get('p_correct'), tier=result.get('tier')).model_dump()
                 if result['spot'] not in state['router'].nodes:
                     raise ValueError('ML returned unknown node')
                 nodes = state['router'].nodes
@@ -268,13 +280,14 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
 
     @app.post('/locate', openapi_extra={'requestBody': {'required': True, 'content': {
         'multipart/form-data': {'schema': {'type': 'object', 'required': ['image'],
-                                           'properties': {'image': {'type': 'string', 'format': 'binary'}}}}}}})
+                                           'properties': {'image': {'type': 'string', 'format': 'binary'},
+                                                          'previous': {'type': 'string'}}}}}}})
     async def locate_endpoint(request: Request):
         if not request.headers.get('content-type', '').lower().startswith('multipart/form-data'):
             raise HTTPException(415, 'Multipart image required')
         try:
             form = await MemoryMultipartParser(request.headers, request.stream(), max_files=1,
-                                               max_fields=0, max_part_size=MAX_BODY).parse()
+                                               max_fields=1, max_part_size=MAX_BODY).parse()
         except (MultiPartException, MultipartParseError):
             raise HTTPException(422, 'Invalid multipart upload') from None
         try:
@@ -284,7 +297,11 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             raw = await upload.read(MAX_UPLOAD + 1)
             if len(raw) > MAX_UPLOAD:
                 raise HTTPException(413, 'Image exceeds 2 MB')
-            return await run_in_threadpool(locate, raw)
+            previous = form.get('previous')
+            if previous is not None and (not isinstance(previous, str)
+                                         or not re.fullmatch(r'p_[0-9a-f]{32}', previous)):
+                raise HTTPException(422, 'Invalid previous photo id')
+            return await run_in_threadpool(locate, raw, previous)
         finally:
             await form.close()
 

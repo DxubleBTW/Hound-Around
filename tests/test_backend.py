@@ -38,9 +38,10 @@ def router():
 class FakeML(StubBackend):
     model_name = 'test-model'
 
-    def locate(self, image):
+    def locate(self, image, previous=None):
         self.seen_size = image.size
         self.seen_exif = dict(image.getexif())
+        self.seen_previous = previous
         result = super().locate(image)
         result['confidence'] = 0.8
         result['top3'][0]['votes'] = 8
@@ -78,7 +79,7 @@ def test_locate_contract_and_privacy(backend, color):
     assert response.status_code == 200
     result = response.json()
     assert set(result) == {'photo_id', 'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'ms'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'ms'}
     assert result['spot'] == 'test_hall'
     assert result['photo_id'].startswith('p_')
     assert result['ms'] >= 0
@@ -95,6 +96,20 @@ def test_health_ready_and_missing_data(backend, tmp_path):
         assert locate(empty).status_code == 503
         assert empty.get('/route', params={'from': 'unknown', 'to': 'unknown'}).status_code == 503
         assert empty.post('/correct', json={'photo_id': 'p_x', 'true_spot': 'unknown'}).status_code == 503
+
+
+def test_second_photo_passes_the_first_photos_vector(backend):
+    client, model, *_ = backend
+    first = locate(client).json()
+    assert model.seen_previous is None
+    files = {'image': ('query.jpg', photo('green'), 'image/jpeg')}
+    second = client.post('/locate', files=files, data={'previous': first['photo_id']})
+    assert second.status_code == 200
+    assert model.seen_previous is not None and model.seen_previous.shape == (384,)
+    # An expired or unknown id falls back to a single-photo answer.
+    unknown = client.post('/locate', files=files, data={'previous': 'p_' + '0' * 32})
+    assert unknown.status_code == 200 and model.seen_previous is None
+    assert client.post('/locate', files=files, data={'previous': 'not-an-id'}).status_code == 422
 
 
 def test_accessible_route_and_alias(backend):
