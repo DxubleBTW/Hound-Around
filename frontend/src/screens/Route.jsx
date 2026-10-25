@@ -5,7 +5,7 @@ import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import { compactSteps } from '../lib/steps.js'
-import { directionsShown, exitLabel, setDirectionsShown, stepsByLeg, usableLegs } from '../lib/legs.js'
+import { directionsShown, exitLabel, passesText, setDirectionsShown, stepsByLeg, turnMarks, usableLegs } from '../lib/legs.js'
 import PawBurst from '../components/PawBurst.jsx'
 import RoutePath from '../components/RoutePath.jsx'
 import { ElevatorIcon } from '../components/Paw.jsx'
@@ -91,6 +91,9 @@ const shortFloor = (code) => (code === 'B1' || code === '-1' ? 'LL' : String(cod
 
 // "Turn left" -> "turn left", for the "Then …" preview sentence.
 const lowerFirst = (s = '') => s.charAt(0).toLowerCase() + s.slice(1)
+
+// A place name mid-sentence: "toward the main stairs", but "toward Room 263".
+const place = (s = '') => (/^Room\b/.test(s) ? s : lowerFirst(s))
 
 const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px]'
 
@@ -209,12 +212,12 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
       const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
       move = moveLabel(kind, levelName)
       const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
-      detail = toward ? `toward ${lowerFirst(toward)}` : ''
+      detail = toward ? `toward ${place(toward)}` : ''
     } else {
       move = kind ? moveLabel(kind) : ''
       const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
       // "Head toward" already ends in "toward": the landmark is the whole detail.
-      detail = toward ? (kind === 'walk' ? toward : `toward ${lowerFirst(toward)}`) : prettifyLandmark(step.instruction, roomLabels[step.node])
+      detail = toward ? (kind === 'walk' ? toward : `toward ${place(toward)}`) : prettifyLandmark(step.instruction, roomLabels[step.node])
     }
   }
   const nextStep = steps[i + 1]
@@ -266,6 +269,9 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
               <span className="min-w-0">
                 <span className="block font-display text-[30px] font-semibold leading-[1.02]">{move}</span>
                 {detail && <span className="mt-1.5 block text-[17px] leading-snug text-[#262626]">{detail}</span>}
+                {passesText(step.passes) && (
+                  <span className="mt-1 block text-[15px] leading-snug text-[#4A4A4A]">{passesText(step.passes)}</span>
+                )}
               </span>
             </span>
             <span className="flex items-baseline justify-between px-4 pb-4 pt-3">
@@ -277,7 +283,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
           {nextStep && (
             <p className="flex items-center gap-3 text-base">
               <TurnIcon kind={nextKind} />
-              <span><span className="text-mist">Then </span>{lowerFirst(moveLabel(nextKind))}{nextToward ? `${nextJoin}${lowerFirst(nextToward)}` : ''}</span>
+              <span><span className="text-mist">Then </span>{lowerFirst(moveLabel(nextKind))}{nextToward ? `${nextJoin}${place(nextToward)}` : ''}</span>
             </p>
           )}
         </>
@@ -312,7 +318,7 @@ function stepWords(step, roomLabels) {
     return { kind, text: moveLabel(kind, badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : '') }
   }
   const join = kind === 'walk' ? ' ' : ' toward '
-  return { kind, text: `${moveLabel(kind)}${toward ? join + lowerFirst(toward) : ''}` }
+  return { kind, text: `${moveLabel(kind)}${toward ? join + place(toward) : ''}` }
 }
 
 // The route screen when the backend sends drawable legs: one floor at a time,
@@ -347,7 +353,8 @@ function RouteMap({ legs, steps, legIndex, reduced, dir, fromText, destText, acc
           <span className="font-display text-xl font-semibold">{floor}</span>
           {legs.length > 1 && <span className="text-mist">Part {legIndex + 1} of {legs.length}</span>}
         </p>
-        <RoutePath points={leg.points} exitMode={leg.exit?.mode} endLabel={roomNumber} label={pathLabel} />
+        <RoutePath leg={leg} marks={turnMarks(leg, legSteps, stepKind)} exitMode={leg.exit?.mode}
+          endLabel={roomNumber} label={pathLabel} />
       </section>
 
       <button onClick={leg.exit ? () => onLeg(legIndex + 1) : onArrive}
@@ -370,14 +377,22 @@ function RouteMap({ legs, steps, legIndex, reduced, dir, fromText, destText, acc
           {showDirections ? 'Hide directions' : 'Show directions'}
         </button>
         {showDirections && (
-          <ol className="mt-1 space-y-2.5">
+          <ol className="mt-1 space-y-3">
             {legSteps.map((step, index) => {
               const { kind, text } = stepWords(step, roomLabels)
               const meters = step.meters > 0 ? Math.max(1, Math.round(step.meters)) : 0
+              const passing = passesText(step.passes)
               return (
-                <li key={`${step.node}-${index}`} className="flex items-center gap-3 text-base">
+                <li key={`${step.node}-${index}`} className="flex items-start gap-3 text-base">
+                  {/* Same number as the mark on the map. */}
+                  <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-snow font-display text-sm font-bold text-night">
+                    {index + 1}
+                  </span>
                   <TurnIcon kind={kind} />
-                  <span className="min-w-0 flex-1">{text}</span>
+                  <span className="min-w-0 flex-1">
+                    {text}
+                    {passing && <span className="mt-0.5 block text-sm text-mist">{passing}</span>}
+                  </span>
                   {meters > 0 && <span className="text-sm text-mist">{meters} m</span>}
                 </li>
               )
