@@ -51,8 +51,10 @@ export function moveLabel(kind, levelName = '') {
     case 'left': return 'Turn left'
     case 'right': return 'Turn right'
     case 'around': return 'Turn around'
-    case 'continue':
-    case 'walk': return 'Keep straight'
+    case 'continue': return 'Keep straight'
+    // A bare "Walk" step means the backend doesn't know which way you face (no
+    // heading, or just out of an elevator), so never claim "straight".
+    case 'walk': return 'Head toward'
     case 'elevator':
     case 'stairs': {
       const verb = kind === 'elevator' ? 'Take the elevator' : 'Take the stairs'
@@ -72,8 +74,8 @@ export function arrowAria(kind) {
     case 'around': return 'Next move: turn around'
     case 'elevator': return 'Next move: change floors by elevator'
     case 'stairs': return 'Next move: change floors by stairs'
+    case 'walk': return 'Next move: head toward the place named on the sign'
     case 'continue':
-    case 'walk':
     default: return 'Next move: keep straight ahead'
   }
 }
