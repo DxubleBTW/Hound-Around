@@ -42,69 +42,69 @@ export default function RoutePath({ leg, marks = [], endLabel = '', exitMode = n
   if (y1 - y0 < MIN) { const c = (y0 + y1) / 2; [y0, y1] = [c - MIN / 2, c + MIN / 2] }
   return (
     <svg viewBox={`${x0} ${y0} ${x1 - x0} ${y1 - y0}`} role="img" aria-label={label}
-      className="block max-h-[36vh] w-full self-center rounded-2xl border border-edge bg-bg">
+      className="block max-h-[36vh] w-full self-center rounded-sm border border-rule bg-night">
       <defs>
         {/* Openings fade out: you see that a hallway is there, not where it goes. */}
         {stubs.map((s, i) => (
           <linearGradient key={i} id={`stub-${i}`} gradientUnits="userSpaceOnUse" x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}>
-            <stop offset="0.35" stopColor="var(--t-card)" />
-            <stop offset="1" stopColor="var(--t-bg)" />
+            <stop offset="0.35" stopColor="var(--color-panel)" />
+            <stop offset="1" stopColor="var(--color-night)" />
           </linearGradient>
         ))}
       </defs>
       {pts.length > 1 && (
         <>
           {/* Walls first (wide grey strokes), then the floor on top: openings cut through the walls. */}
-          <polyline points={line} fill="none" stroke="color-mix(in srgb, var(--t-fg) 38%, transparent)" strokeWidth={HALL + 2 * WALL}
+          <polyline points={line} fill="none" stroke="#6B6B6B" strokeWidth={HALL + 2 * WALL}
             strokeLinejoin="round" strokeLinecap="square" />
           {stubs.map((s, i) => (
-            <line key={`w${i}`} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="color-mix(in srgb, var(--t-fg) 38%, transparent)"
+            <line key={`w${i}`} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="#6B6B6B"
               strokeWidth={HALL + 2 * WALL} opacity="0.55" />
           ))}
           {stubs.map((s, i) => (
             <line key={`f${i}`} x1={s.x1} y1={s.y1} x2={s.x2 + (s.x2 - s.x1) * 0.15} y2={s.y2 + (s.y2 - s.y1) * 0.15}
               stroke={`url(#stub-${i})`} strokeWidth={HALL} />
           ))}
-          <polyline points={line} fill="none" stroke="var(--t-card)" strokeWidth={HALL}
+          <polyline points={line} fill="none" stroke="var(--color-panel)" strokeWidth={HALL}
             strokeLinejoin="round" strokeLinecap="square" />
           {/* Doors beside the path: a short bright mark in the wall on that side. */}
           {doors.map((d, i) => {
             const cx = d.x + d.dx * (HALL / 2 + WALL / 2)
             const cy = d.y + d.dy * (HALL / 2 + WALL / 2)
             return <line key={i} x1={cx - d.dy * 2.2} y1={cy + d.dx * 2.2} x2={cx + d.dy * 2.2} y2={cy - d.dx * 2.2}
-              stroke="var(--t-fg)" strokeWidth={WALL + 0.4} />
+              stroke="var(--color-snow)" strokeWidth={WALL + 0.4} />
           })}
           {/* Your route down the middle of the hallway. */}
-          <polyline className="path-draw" points={line} pathLength="1" fill="none" stroke="var(--t-fg)"
+          <polyline className="route-draw" points={line} pathLength="1" fill="none" stroke="var(--color-maroon-line)"
             strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-          <g className="path-end">
+          <g className="route-end">
             {/* Destination or floor-change marker, revealed once the line lands. */}
-            <rect x={ex - 7} y={ey - 7} width="14" height="14" rx="1.5" fill="var(--t-fg)" />
+            <rect x={ex - 7} y={ey - 7} width="14" height="14" rx="1.5" fill="var(--color-snow)" />
             {exitMode === 'stairs'
-              ? <path d={`M${ex - 4.5} ${ey + 4}h3v-2.7h3v-2.7h3v-2.6`} fill="none" stroke="var(--t-ink)" strokeWidth="1.3" />
+              ? <path d={`M${ex - 4.5} ${ey + 4}h3v-2.7h3v-2.7h3v-2.6`} fill="none" stroke="var(--color-night)" strokeWidth="1.3" />
               : exitMode
-              ? <path d={`M${ex} ${ey - 4}l-3 3h6zM${ex} ${ey + 4}l-3 -3h6z`} fill="var(--t-ink)" />
-              : <text x={ex} y={ey + 2.6} textAnchor="middle" fontFamily="var(--font-sans)" fontWeight="600"
-                  fontSize={endLabel.length > 3 ? 5 : 7} fill="var(--t-ink)">{endLabel}</text>}
+              ? <path d={`M${ex} ${ey - 4}l-3 3h6zM${ex} ${ey + 4}l-3 -3h6z`} fill="var(--color-night)" />
+              : <text x={ex} y={ey + 2.6} textAnchor="middle" fontFamily="Jost, sans-serif" fontWeight="600"
+                  fontSize={endLabel.length > 3 ? 5 : 7} fill="var(--color-night)">{endLabel}</text>}
             {/* Numbered turns, matching the directions list; on top so a turn just before the end stays readable. */}
             {marks.map((m) => {
               const [mx, my] = pts[m.index]
               return (
                 <g key={m.n}>
-                  <circle cx={mx} cy={my} r="3.6" fill="var(--t-fg)" stroke="var(--t-bg)" strokeWidth="0.8" />
-                  <text x={mx} y={my + 1.6} textAnchor="middle" fontFamily="var(--font-sans)" fontWeight="700"
-                    fontSize="4.6" fill="var(--t-ink)">{m.n}</text>
+                  <circle cx={mx} cy={my} r="3.6" fill="var(--color-maroon)" stroke="#FFFFFF" strokeWidth="0.8" />
+                  <text x={mx} y={my + 1.6} textAnchor="middle" fontFamily="Jost, sans-serif" fontWeight="700"
+                    fontSize="4.6" fill="#FFFFFF">{m.n}</text>
                 </g>
               )
             })}
           </g>
           {/* Which way to set off: the map is turned so that's always up. */}
-          <path d={`M${sx} ${sy - 8}l-3 4.4h6z`} fill="#CC0000" />
+          <path d={`M${sx} ${sy - 8}l-3 4.4h6z`} fill="var(--color-here)" />
         </>
       )}
       {/* You are here: BU red dot with a slow pulse ring. */}
-      <circle className="here-ring" cx={sx} cy={sy} r="5" fill="none" stroke="#CC0000" strokeWidth="1.2" />
-      <circle cx={sx} cy={sy} r="3.6" fill="#CC0000" stroke="var(--t-bg)" strokeWidth="1.2" />
+      <circle className="here-pulse" cx={sx} cy={sy} r="5" fill="none" stroke="var(--color-here)" strokeWidth="1.2" />
+      <circle cx={sx} cy={sy} r="3.6" fill="var(--color-here)" stroke="var(--color-snow)" strokeWidth="1.2" />
     </svg>
   )
 }

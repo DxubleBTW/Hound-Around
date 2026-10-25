@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
@@ -7,11 +7,16 @@ import { nextStep } from './lib/tiers.js'
 import { spotName } from './lib/spots.js'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
+import Paw from './components/Paw.jsx'
+import StepLine from './components/StepLine.jsx'
+import Opening, { shouldShowOpening } from './components/Opening.jsx'
 import ManualStart from './screens/ManualStart.jsx'
+import PlacesMenu from './components/PlacesMenu.jsx'
+import ThemeSwitch from './components/ThemeSwitch.jsx'
 import { createApi } from './api.js'
 import { buildingConfig } from './lib/campuses.js'
+import { motionPaused, setMotionPaused } from './lib/motion.js'
 import CampusPicker from './screens/CampusPicker.jsx'
-import Intro from './components/Intro.jsx'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
 function initialDest(fallback) {
@@ -20,32 +25,40 @@ function initialDest(fallback) {
   return to && to.trim() ? to.trim() : fallback
 }
 
-// The opening plays once per browser session (storage can be blocked, in which
-// case it simply plays again).
-const OPENING_KEY = 'hound-opening-seen'
-function openingSeen() { try { return sessionStorage.getItem(OPENING_KEY) === '1' } catch { return false } }
+// Which station of the step line each screen sits at. Manual start skips the line.
+const STEP_OF = { snap: 0, locating: 1, second: 1, confirm: 2, route: 3 }
 
-// Snap → Locating → (second photo) → Confirm or picker → Route, one step at a time.
+// Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
 export default function App() {
   const env = import.meta.env || {}
   const [selection, setSelection] = useState({ school: 'bu', building: 'cds' })
   const [choosing, setChoosing] = useState(false)
+  const [opening, setOpening] = useState(shouldShowOpening)
+  const [paused, setPaused] = useState(motionPaused)
   const building = buildingConfig(selection.school, selection.building, env)
   const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
-  // The logo intro plays over whatever screen opens first.
-  const [intro, setIntro] = useState(() => !openingSeen())
-  const endIntro = useCallback(() => { setIntro(false); try { sessionStorage.setItem(OPENING_KEY, '1') } catch { /* plays again next time */ } }, [])
-  const splash = intro && <Intro onDone={endIntro} />
+
+  useEffect(() => { setMotionPaused(paused) }, [paused])
+  const motion = { paused, toggle: () => setPaused((p) => !p) }
+
+  let body
   if (choosing || !building?.available) {
-    return <>{splash}<CampusPicker current={building || { schoolId: 'bu' }} env={env}
+    body = <CampusPicker current={building || { schoolId: 'bu' }} env={env}
       onCancel={() => setChoosing(false)}
-      onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} /></>
+      onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} />
+  } else {
+    body = <Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
+      motion={motion} onSchoolChange={() => setChoosing(true)} />
   }
-  return <>{splash}<Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
-    onSchoolChange={() => setChoosing(true)} /></>
+  return (
+    <>
+      {body}
+      {opening && <Opening onDone={() => setOpening(false)} />}
+    </>
+  )
 }
 
-function Navigation({ api, building, onSchoolChange }) {
+function Navigation({ api, building, motion, onSchoolChange }) {
   const { MOCK, health } = api
   const [screen, setScreen] = useState('snap')
   const [dest, setDest] = useState(() => {
@@ -59,7 +72,8 @@ function Navigation({ api, building, onSchoolChange }) {
   const [firstLoc, setFirstLoc] = useState(null) // first photo's answer while the second is matched
   const [confirmMode, setConfirmMode] = useState('confirm') // lib/tiers.js
   const [autoPicked, setAutoPicked] = useState(false) // route started without a confirm tap
-  const [toast, setToast] = useState(null) // { msg, celebrate }
+  const [toast, setToast] = useState(null) // { msg, detail, celebrate }
+  const [placesOpen, setPlacesOpen] = useState(false) // the ☰ places menu
 
   // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
   const [server, setServer] = useState(MOCK ? 'ok' : 'checking')
@@ -67,7 +81,7 @@ function Navigation({ api, building, onSchoolChange }) {
 
   useEffect(() => () => { if (photo?.url) URL.revokeObjectURL(photo.url) }, [photo?.url])
 
-  const flash = (msg, celebrate = false) => { setToast({ msg, celebrate }); setTimeout(() => setToast(null), 2600) }
+  const flash = (msg, detail = '', celebrate = false) => { setToast({ msg, detail, celebrate }); setTimeout(() => setToast(null), 3200) }
 
   // Hugging Face Spaces sleep when idle; the first request wakes them. Poll /health until ready (max ~2 min).
   useEffect(() => {
@@ -92,13 +106,8 @@ function Navigation({ api, building, onSchoolChange }) {
     setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('snap')
   }
 
-  // `from` is where the home building drawing sat on screen, so the manual locator
-  // can grow out of it. Buttons elsewhere pass a click event, which is ignored.
-  const [flyFrom, setFlyFrom] = useState(null)
-  const chooseStart = (from) => {
+  const chooseStart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url)
-    setFlyFrom(from && Number.isFinite(from.w) ? from : null)
-    window.scrollTo(0, 0)
     setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('manual')
   }
 
@@ -111,105 +120,142 @@ function Navigation({ api, building, onSchoolChange }) {
     else if (step === 'second') setScreen('second')
     else { setConfirmMode(step); setScreen('confirm') }
   }
+
   const pickInstead = () => { setAutoPicked(false); setConfirmMode('picker'); setScreen('confirm') }
 
-  const statusPill =
-    MOCK ? { tone: 'muted', text: 'Demo data · backend not connected' }
-    : server === 'checking' ? { tone: 'muted', text: 'Connecting to Hound Around…', live: true }
-    : server === 'waking' ? { tone: 'muted', text: 'Server waking up, about 30 s…', live: true }
-    : server === 'down' ? { tone: 'muted', text: 'Can’t reach the server right now' }
-    : model.startsWith('stub') ? { tone: 'alert', text: 'Test backend · not real recognition' }
+  const status =
+    MOCK ? { text: 'Demo data. The backend isn’t connected.' }
+    : server === 'checking' ? { text: 'Connecting to Hound Around…', live: true }
+    : server === 'waking' ? { text: 'The server is waking up. About 30 seconds.', live: true }
+    : server === 'down' ? { text: 'Can’t reach the server right now. Try again in a minute.' }
+    : model.startsWith('stub') ? { text: 'Test backend. This isn’t real recognition.' }
     : null
 
-  return (
-    <div className="mx-auto flex min-h-full max-w-md flex-col px-5 pt-[max(.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {statusPill && (
-        <div role="status" className={`mx-auto mb-1 flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ${statusPill.tone === 'alert' ? 'bg-tint text-rose' : 'bg-card text-dim shadow-[0_1px_0_rgb(255_255_255/.04)_inset]'}`}>
-          {statusPill.live && <span className="pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-fg" />}
-          {statusPill.text}
-        </div>
-      )}
+  const step = STEP_OF[screen]
 
-      {screen === 'snap' && (
-        <Snap
-          dest={dest} setDest={setDest}
-          accessible={accessible} setAccessible={setAccessible}
-          onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
-          onManual={chooseStart}
-          destinations={building.destinations}
-          destinationGroups={building.destinationGroups}
-          resolvePlace={building.resolvePlace}
-          roomLabels={building.roomLabels}
-          buildingLabel={building.shortName || building.name}
-          building={building}
-          schoolName={building.schoolName}
-          onSchoolChange={onSchoolChange}
-        />
-      )}
-      {screen === 'locating' && (
-        <Locating
-          photo={photo}
-          previous={firstLoc?.photo_id}
-          onDone={located}
-          onCancel={restart}
-          onManual={chooseStart}
-          api={api}
-          buildingLabel={building.shortName || building.name}
-        />
-      )}
-      {screen === 'second' && (
-        <SecondPhoto
-          photo={photo}
-          onPhoto={(p) => { setFirstLoc(loc); setPhoto(p); setScreen('locating') }}
-          onSkip={() => { setConfirmMode('picker'); setScreen('confirm') }}
-          onManual={chooseStart}
-        />
-      )}
-      {screen === 'confirm' && (
-        <Confirm
-          photo={photo} loc={loc} mode={confirmMode} fused={!!firstLoc}
-          onConfirm={(spot, learned) => {
-            setHere(spot)
-            if (learned) {
-              const size = Number.isFinite(learned) ? learned : null
-              flash(size ? `Thanks, it learned that. ${size} frames indexed.` : 'Thanks, it learned that.', true)
-            }
-            setScreen('route')
-          }}
-          onRetake={restart}
-          onManual={chooseStart}
-          api={api}
-          buildingLabel={building.shortName || building.name}
-          roomLabels={building.roomLabels}
-        />
-      )}
-      {screen === 'manual' && (
-        <ManualStart dest={building.resolvePlace(dest)} accessible={accessible} roomLabels={building.roomLabels}
-          floors={building.floors} groups={building.destinationGroups} flyFrom={flyFrom}
-          onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
-      )}
-      {screen === 'route' && autoPicked && (
-        // Auto-picked without a tap: one obvious way out if it's wrong.
-        <p className="rise mt-2 flex items-center justify-between gap-3 rounded-2xl border border-edge bg-card px-4 py-2.5 text-[14px]">
-          <span className="min-w-0 text-dim">Matched to <span className="font-semibold text-fg">{spotName(here, building.roomLabels)}</span></span>
-          <button onClick={pickInstead} className="min-h-[36px] shrink-0 font-semibold underline underline-offset-[3px]">Not here?</button>
+  return (
+    <div className="mx-auto flex min-h-full max-w-md flex-col px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Paw size={22} color="var(--color-snow)" />
+            <span className="font-display text-xl font-semibold leading-none">Hound Around</span>
+          </div>
+          <button onClick={onSchoolChange}
+            className="flex min-h-[36px] items-center text-left text-sm text-mist underline decoration-rule underline-offset-[3px] hover:text-snow">
+            In {building.shortName || building.name}, {building.schoolName}
+          </button>
+        </div>
+        <div className="-mr-2 flex shrink-0">
+          <ThemeSwitch />
+          <button type="button" onClick={motion.toggle} aria-pressed={motion.paused}
+            aria-label={motion.paused ? 'Play motion' : 'Pause motion'}
+            className="press grid h-11 w-11 place-items-center rounded-sm text-snow hover:bg-panel">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              {motion.paused ? <path d="M8 5.5v13l10-6.5z" fill="currentColor" /> : <path d="M9 6v12M15 6v12" />}
+            </svg>
+          </button>
+          {/* ☰: places in this building, by kind, and Spots to know. */}
+          <button type="button" onClick={() => setPlacesOpen(true)} aria-label="Places menu" aria-haspopup="dialog"
+            aria-expanded={placesOpen} className="press grid h-11 w-11 place-items-center rounded-sm text-snow hover:bg-panel">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      <PlacesMenu open={placesOpen} onClose={() => setPlacesOpen(false)} groups={building.destinationGroups || []}
+        selected={building.resolvePlace(dest)} onPick={setDest} />
+
+      {status && (
+        <p role="status" className="mt-1 flex items-center gap-2 text-sm text-mist">
+          {status.live && <span aria-hidden className="breathe inline-block h-2 w-2 rounded-full bg-snow" />}
+          {status.text}
         </p>
       )}
-      {screen === 'route' && (
-        <Route
-          from={here} heading={here === loc?.spot ? loc?.heading : undefined} photo={here === loc?.spot ? photo : null}
-          dest={dest} accessible={accessible}
-          onRestart={restart}
-          api={api}
-          resolvePlace={building.resolvePlace}
-          roomLabels={building.roomLabels}
-        />
-      )}
+
+      {step !== undefined && <div className="mt-5"><StepLine current={step} /></div>}
+
+      <div key={screen} className="enter flex flex-1 flex-col">
+        {screen === 'snap' && (
+          <Snap
+            dest={dest} setDest={setDest}
+            accessible={accessible} setAccessible={setAccessible}
+            onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
+            onManual={chooseStart}
+            onBrowse={() => setPlacesOpen(true)}
+            destinations={building.destinations}
+            destinationGroups={building.destinationGroups}
+            resolvePlace={building.resolvePlace}
+          />
+        )}
+        {screen === 'locating' && (
+          <Locating
+            photo={photo}
+            previous={firstLoc?.photo_id}
+            onDone={located}
+            onCancel={restart}
+            onManual={chooseStart}
+            api={api}
+            buildingLabel={building.shortName || building.name}
+          />
+        )}
+        {screen === 'second' && (
+          <SecondPhoto
+            photo={photo}
+            onPhoto={(p) => { setFirstLoc(loc); setPhoto(p); setScreen('locating') }}
+            onSkip={() => { setConfirmMode('picker'); setScreen('confirm') }}
+            onManual={chooseStart}
+          />
+        )}
+        {screen === 'confirm' && (
+          <Confirm
+            photo={photo} loc={loc} mode={confirmMode} fused={!!firstLoc}
+            onConfirm={(spot, learned) => {
+              setHere(spot)
+              if (learned) {
+                const size = Number.isFinite(learned) ? learned : null
+                flash('Got it. The next person here gets it right.', size ? `Hallway views: ${size.toLocaleString()}` : '', true)
+              }
+              setScreen('route')
+            }}
+            onRetake={restart}
+            onManual={chooseStart}
+            api={api}
+            buildingLabel={building.shortName || building.name}
+            roomLabels={building.roomLabels}
+          />
+        )}
+        {screen === 'manual' && (
+          <ManualStart landmarks={building.landmarks} accessible={accessible} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
+        )}
+        {screen === 'route' && autoPicked && (
+          // Auto-picked without a tap: one obvious way out if it's wrong.
+          <p className="mt-4 flex items-center justify-between gap-3 rounded-sm bg-panel px-3.5 py-2.5 text-sm">
+            <span className="min-w-0 text-mist">Matched to {spotName(here, building.roomLabels)}</span>
+            <button onClick={pickInstead} className="min-h-[36px] shrink-0 underline underline-offset-[3px]">Not here?</button>
+          </p>
+        )}
+        {screen === 'route' && (
+          <Route
+            from={here} heading={here === loc?.spot ? loc?.heading : undefined}
+            dest={dest} accessible={accessible}
+            onRestart={restart}
+            api={api}
+            resolvePlace={building.resolvePlace}
+            roomLabels={building.roomLabels}
+            floors={building.floors}
+          />
+        )}
+      </div>
 
       {toast && (
-        <div role="status" className="rise fixed inset-x-4 top-[max(.75rem,env(safe-area-inset-top))] z-30 mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-edge bg-raise px-4 py-3 text-left text-[14px] text-fg shadow-[var(--shadow-float)]">
-          {toast.celebrate && <PawBurst size={30} className="shrink-0" />}
-          <span className="flex-1">{toast.msg}</span>
+        <div role="status" className="toast-in fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto flex max-w-sm items-center gap-3 rounded-sm bg-panel px-4 py-3.5 text-left">
+          {toast.celebrate && <PawBurst size={34} className="shrink-0" />}
+          <span className="flex-1">
+            <span className="block font-display text-[17px] font-semibold leading-tight">{toast.msg}</span>
+            {toast.detail && <span className="mt-0.5 block text-sm text-mist">{toast.detail}</span>}
+          </span>
         </div>
       )}
     </div>
