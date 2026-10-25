@@ -1,79 +1,243 @@
 @import "tailwindcss";
 
-@theme {
+/* Black and white, like a printed timetable, in a dark and a light version.
+   Flat, solid surfaces with a thin edge; the primary action is the one inverted
+   block (white on dark, black on light). Helvetica throughout, titles in bold
+   with tight tracking: the system Helvetica on Apple devices, and Arimo (drawn to
+   Helvetica's widths) everywhere else.
+   Colours are variables (--t-*) so a subtree can pin a theme (.always-dark), and
+   html[data-theme] switches the whole app. */
+:root, .always-dark {
+  --t-bg: #0B0B0C;
+  --t-card: #161618;
+  --t-raise: #232326;
+  --t-edge: #303034;
+  --t-fg: #F5F4F2;
+  --t-dim: #A3A3A7;
+  --t-faint: #6F6F74;
+  --t-ink: #0B0B0C;     /* text on the inverted (primary) block */
+  --t-control: #222225; /* buttons and chips */
+  --t-line: rgb(255 255 255 / .12);
+  --t-shadow: rgb(0 0 0 / .55);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --t-bg: #F1F1EE;
+  --t-card: #FFFFFF;
+  --t-raise: #E6E6E2;
+  --t-edge: #D6D6D1;
+  --t-fg: #111113;
+  --t-dim: #5C5C61;
+  --t-faint: #8C8C91;
+  --t-ink: #F7F7F5;
+  --t-control: #FFFFFF;
+  --t-line: rgb(0 0 0 / .1);
+  --t-shadow: rgb(0 0 0 / .12);
+  color-scheme: light;
+}
+.always-dark { color: var(--t-fg); }
+
+@theme inline {
   --color-scarlet: #CC0000;
-  --color-scarlet-dark: #990000;
-  --color-paper: #FBF7F2;
-  --color-ink: #1A1414;
-  --color-muted: #6B6060;
-  --color-line: #E8E0D8;
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-scarlet-dark: #A30000;
+  --color-rose: var(--t-fg);
+  --color-tint: color-mix(in srgb, var(--t-fg) 9%, transparent);
+  --color-bg: var(--t-bg);
+  --color-card: var(--t-card);
+  --color-raise: var(--t-raise);
+  --color-edge: var(--t-edge);
+  --color-fg: var(--t-fg);
+  --color-dim: var(--t-dim);
+  --color-faint: var(--t-faint);
+  --color-sign: #F7F5F2;
+  --color-go: var(--t-fg);
+  --color-paper: var(--t-fg);
+  --color-ink: var(--t-ink);
+  --font-display: var(--app-display, "Helvetica Neue"), Helvetica, Arimo, Arial, sans-serif;
+  --font-sans: var(--app-font, "Helvetica Neue"), Helvetica, Arimo, Arial, sans-serif;
+  --shadow-sheet: 0 -1px 0 var(--t-line), 0 -12px 30px var(--t-shadow);
+  --shadow-float: 0 6px 18px var(--t-shadow);
 }
 
 html, body, #root { height: 100%; }
 body {
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--t-bg);
+  color: var(--t-fg);
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
+  accent-color: var(--t-fg);
 }
+::selection { background: var(--t-fg); color: var(--t-ink); }
+input, textarea { caret-color: var(--t-fg); }
+/* The destination field keeps its suggestions but not Chrome's dropdown arrow. */
+input[list]::-webkit-calendar-picker-indicator { display: none !important; }
 
 @keyframes scan { 0% { top: 0% } 50% { top: 100% } 100% { top: 0% } }
 .scan-line { animation: scan 2.4s ease-in-out infinite; }
 
-@keyframes sniff { 0%,100% { transform: translateX(0) } 50% { transform: translateX(6px) } }
-.sniff { animation: sniff .9s ease-in-out infinite; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
+.rise { animation: rise .3s cubic-bezier(.2,.7,.3,1) both; }
 
-@keyframes rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
-.rise { animation: rise .35s ease-out both; }
+/* Sign changes slide toward travel. */
+@keyframes rise-left { from { opacity: 0; transform: translateX(24px) } to { opacity: 1; transform: none } }
+.rise-left { animation: rise-left .28s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes rise-right { from { opacity: 0; transform: translateX(-24px) } to { opacity: 1; transform: none } }
+.rise-right { animation: rise-right .28s cubic-bezier(.2,.7,.3,1) both; }
 
-/* Screen-to-screen entrance variants (step transitions slide toward travel). */
-@keyframes rise-left { from { opacity: 0; transform: translateX(28px) } to { opacity: 1; transform: none } }
-.rise-left { animation: rise-left .32s cubic-bezier(.2,.7,.3,1) both; }
-@keyframes rise-right { from { opacity: 0; transform: translateX(-28px) } to { opacity: 1; transform: none } }
-.rise-right { animation: rise-right .32s cubic-bezier(.2,.7,.3,1) both; }
-
-/* Slow drifting gradient for the hero, tied to the "sniffing around" theme. */
-@keyframes drift { 0%,100% { background-position: 0% 50% } 50% { background-position: 100% 50% } }
-.drift { background-size: 200% 200%; animation: drift 9s ease-in-out infinite; }
-
-/* Breathing pulse for the live match meter / active status dot. */
-@keyframes pulse-soft { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity: .55; transform: scale(.88) } }
+/* Breathing pulse for the live dot. */
+@keyframes pulse-soft { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity: .45; transform: scale(.85) } }
 .pulse-soft { animation: pulse-soft 1.4s ease-in-out infinite; }
 
-/* Paw trail: three dots fading in sequence while matching. */
+/* Paw trail while preparing a photo. */
 @keyframes paw-trail { 0%,100% { opacity: .25; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
 .paw-trail > span { animation: paw-trail 1.2s ease-in-out infinite; }
 .paw-trail > span:nth-child(2) { animation-delay: .18s; }
 .paw-trail > span:nth-child(3) { animation-delay: .36s; }
 
-/* Celebratory paw burst for the "it learned" moment and arrival flourish. */
+/* Arrival paw and sparks. */
 @keyframes burst { 0% { opacity: 0; transform: scale(.4) } 55% { opacity: 1; transform: scale(1.12) } 100% { opacity: 1; transform: scale(1) } }
 .burst { animation: burst .5s cubic-bezier(.2,.9,.3,1.2) both; }
 @keyframes spark { 0% { opacity: 0; transform: translate(0,0) scale(.4) } 40% { opacity: 1 } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1) } }
 .spark { animation: spark .7s ease-out both; }
 
-/* Vote / meter bars grow to their target width. */
+/* Meter bars grow to their width. */
 @keyframes grow-x { from { transform: scaleX(0) } to { transform: scaleX(1) } }
 .grow-x { transform-origin: left; animation: grow-x .55s cubic-bezier(.2,.7,.3,1) both; }
 
-/* Relative "next move" arrow: a gentle nudge in the move's direction. This is a
-   RELATIVE turn cue, never a magnetic/device compass (hard no-sensors rule), so
-   the motion is a subtle breathing nudge, not a spinning needle. The direction
-   of travel is set per-kind via --nudge-x / --nudge-y. */
-@keyframes arrow-nudge {
-  0%, 100% { transform: translate(0, 0) }
-  50% { transform: translate(var(--nudge-x, 0), var(--nudge-y, 0)) }
-}
+/* The elevator car travels along its track. */
+@keyframes car { from { top: var(--car-from) } to { top: var(--car-to) } }
+.elevator-car { animation: car 1.6s cubic-bezier(.6,0,.3,1) .3s both; }
+
+/* Relative "next move" arrow nudge (never a compass). */
+@keyframes arrow-nudge { 0%, 100% { transform: translate(0, 0) } 50% { transform: translate(var(--nudge-x, 0), var(--nudge-y, 0)) } }
 .arrow-nudge { animation: arrow-nudge 1.6s ease-in-out infinite; }
 
-/* Honor the user's motion preference: every animation collapses to a static end state. */
 @media (prefers-reduced-motion: reduce) {
-  .scan-line, .sniff, .rise, .rise-left, .rise-right, .drift,
-  .pulse-soft, .paw-trail > span, .burst, .spark, .grow-x, .arrow-nudge {
-    animation: none !important;
-  }
-  .drift { background-position: 50% 50%; }
+  .scan-line, .rise, .rise-left, .rise-right, .pulse-soft, .paw-trail > span,
+  .burst, .spark, .grow-x, .elevator-car, .arrow-nudge { animation: none !important; }
   .grow-x { transform: none; }
+  .elevator-car { top: var(--car-to) !important; }
+}
+
+/* Indeterminate progress, the way a maps app shows "working". */
+@keyframes indeterminate { 0% { left: -40%; width: 40% } 60% { left: 100%; width: 60% } 100% { left: 100%; width: 60% } }
+.progress-bar { position: absolute; top: 0; bottom: 0; animation: indeterminate 1.4s cubic-bezier(.4,0,.2,1) infinite; }
+@media (prefers-reduced-motion: reduce) { .progress-bar { animation: none; left: 0; width: 100%; opacity: .5; } }
+
+/* Chip rail scrolls by touch without a visible scrollbar. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Surfaces: solid fills with a thin edge, no gradients. `.glass` floats over
+   content (search bar), `.glass-strong` is a sheet or window. */
+.glass {
+  background: var(--t-card);
+  border: 1px solid var(--t-line);
+  box-shadow: 0 8px 24px -10px var(--t-shadow);
+}
+.glass-strong {
+  background: var(--t-card);
+  border: 1px solid var(--t-line);
+  box-shadow: 0 -10px 30px -12px var(--t-shadow);
+}
+.glass-red { background: var(--t-fg); color: var(--t-ink); border: 1px solid var(--t-line); }
+
+/* Controls: `.lg` a solid button or chip, `.lg-bright` the inverted primary.
+   They keep the press squish. */
+@layer components {
+.lg, .lg-bright { position: relative; isolation: isolate; overflow: hidden; }
+.lg {
+  background: var(--t-control);
+  border: 1px solid var(--t-line);
+  box-shadow: 0 4px 14px -8px var(--t-shadow);
+}
+.lg-bright {
+  background: var(--t-fg);
+  border: 1px solid var(--t-fg);
+  box-shadow: 0 8px 22px -10px var(--t-shadow);
+  color: var(--t-ink);
+}
+.lg:hover { background: color-mix(in srgb, var(--t-control), var(--t-fg) 6%); }
+.lg:active, .lg-bright:active { transform: scale(.965); }
+}
+
+/* Cards in a stack are solid already, so the card behind never shows through. */
+
+/* Title weight follows the face (some display faces ship only one weight). */
+.font-display { font-weight: var(--display-weight, 700) !important; letter-spacing: -.02em; }
+
+/* Value changes: new text rolls up out of a soft blur, so the eye catches what
+   changed (a new destination, the time left, the distance). */
+@keyframes value-in { from { opacity: 0; transform: translateY(.45em); filter: blur(5px) } to { opacity: 1; transform: none; filter: none } }
+.value-in { display: inline-block; animation: value-in .38s cubic-bezier(.2,.8,.2,1) both; }
+.value-in-late { animation-delay: .06s; }
+/* A chosen item answers with a small pop. */
+@keyframes pop { 0% { transform: scale(.6) } 60% { transform: scale(1.12) } 100% { transform: scale(1) } }
+.pop { animation: pop .32s cubic-bezier(.2,.9,.3,1.3) both; }
+@media (prefers-reduced-motion: reduce) { .value-in, .pop { animation: none !important; } }
+
+/* Proof of concept: the choice pop and the route between "you" and the room. */
+@keyframes pop-in { 0% { opacity: 0; transform: translateY(18px) scale(.92) } 70% { opacity: 1; transform: translateY(-2px) scale(1.01) } 100% { opacity: 1; transform: none } }
+.pop-in { animation: pop-in .45s cubic-bezier(.2,.9,.3,1.1) both; }
+@keyframes route-flow { from { background-position: 0 50% } to { background-position: 12px 50% } }
+.route-dots { background-image: radial-gradient(circle, currentColor 1.6px, transparent 1.9px); background-size: 12px 6px; background-repeat: repeat-x; animation: route-flow .7s linear infinite; }
+@keyframes route-draw { from { clip-path: inset(0 100% 0 0) } to { clip-path: inset(0 0 0 0) } }
+.route-draw { animation: route-draw .6s cubic-bezier(.4,0,.2,1) .15s both; }
+@media (prefers-reduced-motion: reduce) { .pop-in, .route-dots, .route-draw { animation: none !important; } }
+
+/* The current step on the route outline fills and refills while you walk it. */
+@keyframes route-now { 0% { width: 0 } 70% { width: 100% } 100% { width: 100%; opacity: 0 } }
+.route-now { animation: route-now 1.8s cubic-bezier(.4,0,.2,1) infinite; }
+@media (prefers-reduced-motion: reduce) { .route-now { animation: none; width: 50%; } }
+
+/* Snapping logo: the viewfinder glides in and frames the logo tile, the paw gives a
+   slow wave. Long, soft easing so there's time to see it. */
+.snap-corners { transform-origin: 50% 50%; }
+.snap-tile { transform-origin: 50% 50%; }
+.snap-paw { transform-box: fill-box; transform-origin: 50% 85%; }
+@keyframes tile-in { 0% { transform: scale(.82); opacity: 0 } 35% { transform: scale(1); opacity: 1 } 58% { transform: scale(.96) } 74%, 100% { transform: scale(1) } }
+@keyframes corners-in { 0%, 18% { transform: scale(1.75) rotate(-8deg); opacity: 0 } 34% { opacity: .8 } 62% { transform: scale(1) rotate(0); opacity: 1 } 100% { transform: scale(1) } }
+@keyframes paw-wave { 0%, 58% { transform: rotate(0) } 70% { transform: rotate(-11deg) } 82% { transform: rotate(7deg) } 92% { transform: rotate(-2deg) } 100% { transform: rotate(0) } }
+.snap-intro .snap-tile { animation: tile-in 2.2s cubic-bezier(.45,0,.25,1) both; }
+.snap-intro .snap-corners { animation: corners-in 2.2s cubic-bezier(.45,0,.25,1) both; }
+.snap-intro .snap-paw { animation: paw-wave 2.2s cubic-bezier(.45,0,.35,1) both; }
+@keyframes corners-loop { 0%, 100% { transform: scale(1.12); opacity: .55 } 50% { transform: scale(1); opacity: 1 } }
+@keyframes tile-loop { 0%, 100% { transform: scale(1) } 50% { transform: scale(.95) } }
+.snap-loop .snap-corners { animation: corners-loop 2.6s cubic-bezier(.45,0,.55,1) infinite; }
+.snap-loop .snap-tile { animation: tile-loop 2.6s cubic-bezier(.45,0,.55,1) infinite; }
+.snap-loop .snap-paw { animation: paw-wave 2.6s cubic-bezier(.45,0,.35,1) infinite; }
+/* Shutter flash, once, right as the corners close. */
+@keyframes flash { 0%, 56% { opacity: 0 } 62% { opacity: .55 } 100% { opacity: 0 } }
+.intro-flash { opacity: 0; animation: flash 2.2s cubic-bezier(.3,0,.3,1) both; }
+/* Intro: the paw outline pops in and the name rises letter by letter; on the way
+   out the paw pops up a touch and snaps shut with a twist, like a shutter. */
+@keyframes intro-paw { 0% { transform: scale(.6); opacity: 0 } 60% { transform: scale(1.06); opacity: 1 } 100% { transform: scale(1) } }
+.intro-paw { transform-origin: 50% 60%; animation: intro-paw .55s cubic-bezier(.3,.7,.3,1) both; }
+@keyframes intro-letter { from { opacity: 0; transform: translateY(.55em) scale(.96); filter: blur(10px) } to { opacity: 1; transform: none; filter: none } }
+.intro-letter { display: inline-block; animation: intro-letter .5s cubic-bezier(.25,.8,.25,1) both; }
+@keyframes snap-out { 0% { transform: scale(1) rotate(0); opacity: 1 } 35% { transform: scale(1.14) rotate(-6deg); opacity: 1 } 100% { transform: scale(0) rotate(28deg); opacity: 0 } }
+@keyframes title-out { to { opacity: 0; transform: translateY(-8px); filter: blur(6px) } }
+.intro-leave .intro-paw { animation: snap-out .42s cubic-bezier(.55,0,.75,.2) forwards; }
+.intro-leave .intro-title { animation: title-out .26s ease-in forwards; }
+.intro { transition: opacity .26s .34s ease-out; }
+.intro-leave { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .snap-intro .snap-corners, .snap-intro .snap-tile, .snap-intro .snap-paw, .snap-loop .snap-corners, .snap-loop .snap-tile, .snap-loop .snap-paw, .intro-paw, .intro-letter { animation: none !important; }
+  .intro-flash { display: none; }
+}
+
+
+/* Manual locator: words and buttons arrive once the building has flown in. */
+@keyframes arrive { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+.arrive-late { animation: arrive .45s .55s cubic-bezier(.25,.8,.25,1) both; }
+.arrive-later { animation: arrive .45s 1.05s cubic-bezier(.25,.8,.25,1) both; }
+@media (prefers-reduced-motion: reduce) { .arrive-late, .arrive-later { animation: none; } }
+/* Floor buttons in the building drawing: a visible focus ring for keyboards. */
+.floor-pill:focus-visible .floor-pill-bg { stroke: var(--t-fg); stroke-width: 2.4px; }
+
+/* Switching themes: a circular reveal from the switch where the browser supports
+   view transitions, else a short colour fade. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+html.theme-fade, html.theme-fade *, html.theme-fade *::before, html.theme-fade *::after {
+  transition: background-color .4s ease, color .4s ease, border-color .4s ease, fill .4s ease, stroke .4s ease !important;
 }

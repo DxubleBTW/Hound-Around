@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
@@ -8,6 +8,7 @@ import ManualStart from './screens/ManualStart.jsx'
 import { createApi } from './api.js'
 import { buildingConfig } from './lib/campuses.js'
 import CampusPicker from './screens/CampusPicker.jsx'
+import Intro from './components/Intro.jsx'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
 function initialDest(fallback) {
@@ -23,13 +24,17 @@ export default function App() {
   const [choosing, setChoosing] = useState(false)
   const building = buildingConfig(selection.school, selection.building, env)
   const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
+  // The logo intro plays once per app load, over whatever screen opens first.
+  const [intro, setIntro] = useState(true)
+  const endIntro = useCallback(() => setIntro(false), [])
+  const splash = intro && <Intro onDone={endIntro} />
   if (choosing || !building?.available) {
-    return <CampusPicker current={building || { schoolId: 'bu' }} env={env}
+    return <>{splash}<CampusPicker current={building || { schoolId: 'bu' }} env={env}
       onCancel={() => setChoosing(false)}
-      onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} />
+      onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} /></>
   }
-  return <Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
-    onSchoolChange={() => setChoosing(true)} />
+  return <>{splash}<Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
+    onSchoolChange={() => setChoosing(true)} /></>
 }
 
 function Navigation({ api, building, onSchoolChange }) {
@@ -76,8 +81,13 @@ function Navigation({ api, building, onSchoolChange }) {
     setPhoto(null); setLoc(null); setHere(null); setScreen('snap')
   }
 
-  const chooseStart = () => {
+  // `from` is where the home building drawing sat on screen, so the manual locator
+  // can grow out of it. Buttons elsewhere pass a click event, which is ignored.
+  const [flyFrom, setFlyFrom] = useState(null)
+  const chooseStart = (from) => {
     if (photo?.url) URL.revokeObjectURL(photo.url)
+    setFlyFrom(from && Number.isFinite(from.w) ? from : null)
+    window.scrollTo(0, 0)
     setPhoto(null); setLoc(null); setHere(null); setScreen('manual')
   }
 
@@ -90,18 +100,10 @@ function Navigation({ api, building, onSchoolChange }) {
     : null
 
   return (
-    <div className="mx-auto flex min-h-full max-w-md flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-      <button onClick={onSchoolChange} className="mb-2 min-h-[44px] self-start text-left text-sm font-semibold">
-        {building.schoolName} · {building.shortName || building.name} · Change school
-      </button>
+    <div className="mx-auto flex min-h-full max-w-md flex-col px-5 pt-[max(.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       {statusPill && (
-        <div
-          role="status"
-          className={`mb-2 flex items-center gap-1.5 self-center rounded-full px-3 py-1 text-[11px] font-medium ${
-            statusPill.tone === 'alert' ? 'bg-scarlet/10 text-scarlet' : 'bg-ink/5 text-muted'
-          }`}
-        >
-          {statusPill.live && <span className="pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-scarlet" />}
+        <div role="status" className={`mx-auto mb-1 flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ${statusPill.tone === 'alert' ? 'bg-tint text-rose' : 'bg-card text-dim shadow-[0_1px_0_rgb(255_255_255/.04)_inset]'}`}>
+          {statusPill.live && <span className="pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-fg" />}
           {statusPill.text}
         </div>
       )}
@@ -115,6 +117,11 @@ function Navigation({ api, building, onSchoolChange }) {
           destinations={building.destinations}
           destinationGroups={building.destinationGroups}
           resolvePlace={building.resolvePlace}
+          roomLabels={building.roomLabels}
+          buildingLabel={building.shortName || building.name}
+          building={building}
+          schoolName={building.schoolName}
+          onSchoolChange={onSchoolChange}
         />
       )}
       {screen === 'locating' && (
@@ -146,11 +153,13 @@ function Navigation({ api, building, onSchoolChange }) {
         />
       )}
       {screen === 'manual' && (
-        <ManualStart landmarks={building.landmarks} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
+        <ManualStart dest={building.resolvePlace(dest)} accessible={accessible} roomLabels={building.roomLabels}
+          floors={building.floors} groups={building.destinationGroups} flyFrom={flyFrom}
+          onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
       )}
       {screen === 'route' && (
         <Route
-          from={here} heading={here === loc?.spot ? loc?.heading : undefined}
+          from={here} heading={here === loc?.spot ? loc?.heading : undefined} photo={here === loc?.spot ? photo : null}
           dest={dest} accessible={accessible}
           onRestart={restart}
           api={api}
@@ -160,8 +169,8 @@ function Navigation({ api, building, onSchoolChange }) {
       )}
 
       {toast && (
-        <div className="rise fixed inset-x-4 bottom-6 mx-auto flex max-w-sm items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-sm font-medium text-paper shadow-[0_18px_40px_-12px_rgba(26,20,20,.6)]">
-          {toast.celebrate && <PawBurst size={34} className="shrink-0" />}
+        <div role="status" className="rise fixed inset-x-4 bottom-32 z-30 mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-edge bg-raise px-4 py-3 text-left text-[14px] text-fg shadow-[var(--shadow-float)]">
+          {toast.celebrate && <PawBurst size={30} className="shrink-0" />}
           <span className="flex-1">{toast.msg}</span>
         </div>
       )}

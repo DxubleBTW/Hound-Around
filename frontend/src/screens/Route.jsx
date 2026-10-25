@@ -5,6 +5,9 @@ import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import PawBurst from '../components/PawBurst.jsx'
+import Icon from '../components/Icon.jsx'
+import { floorMark } from '../lib/floors.js'
+import { BottomBar, Button, Sheet, TextAction, TopBar, focusRing } from '../components/ui.jsx'
 
 // Ethics rule from the brief: NO public building map. No floor plan, no SVG layout,
 // no "you are here" dot or coordinate. We make directions feel full using WORDS only
@@ -77,7 +80,7 @@ function verticalDir(node, instruction = '') {
   return to > from ? 'up' : 'down'
 }
 
-export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination, roomLabels = {} }) {
+export default function Route({ from, heading, photo = null, dest, accessible, onRestart, api, resolvePlace = resolveDestination, roomLabels = {} }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -132,23 +135,35 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
 
   if (error && error.key === requestKey) {
     return (
-      <main className="rise flex flex-1 flex-col justify-center text-center">
-        <p className="font-display text-2xl font-bold">
-          {error.unknownDest ? 'Can’t find that place' : `Couldn’t find a route to ${destinationLabel(resolvedDest, roomLabels)}`}
-        </p>
-        <p role="alert" className="mt-2 text-sm text-muted">{error.message}</p>
-        {/* A retry only helps when the destination itself is valid; for an unknown
-            destination we send the user back to choose one instead. */}
-        {!error.unknownDest && (
-          <button onClick={() => setAttempt((value) => value + 1)} className="mt-6 min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Try again</button>
-        )}
-        <button onClick={onRestart} className="mt-6 min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
-          {error.unknownDest ? 'Pick another destination' : 'Start over'}
-        </button>
+      <main className="rise flex flex-1 flex-col">
+        <TopBar onBack={onRestart} backLabel="Start over" />
+        <Sheet>
+          {error.unknownDest
+            ? <span className="lg flex h-11 w-11 items-center justify-center rounded-full font-display text-[22px] font-bold" aria-hidden>?</span>
+            : <span className="flex h-11 w-11 items-center justify-center rounded-full bg-tint text-rose"><Icon name="flag" size={22} /></span>}
+          <p className="font-display mt-4 text-balance text-[22px] font-bold">
+            {error.unknownDest ? 'Can’t find that place' : `Couldn’t find a route to ${destinationLabel(resolvedDest, roomLabels)}`}
+          </p>
+          <p role="alert" className="mt-1 text-[15px] text-dim">{error.message}</p>
+          {/* A retry only helps when the destination itself is valid; for an unknown
+              destination we send the user back to choose one instead. */}
+          <div className="mt-5 flex flex-col gap-2">
+            {!error.unknownDest && <Button onClick={() => setAttempt((value) => value + 1)} className="w-full">Try again</Button>}
+            <Button variant={error.unknownDest ? 'primary' : 'secondary'} onClick={onRestart} className="w-full">{error.unknownDest ? 'Pick another destination' : 'Start over'}</Button>
+          </div>
+        </Sheet>
       </main>
     )
   }
-  if (!data) return <main role="status" className="flex flex-1 items-center justify-center text-muted">Planning your route…</main>
+  if (!data) {
+    return (
+      <main role="status" aria-label="Planning your route…" className="flex flex-1 flex-col pt-2">
+        <div className="h-[112px] animate-pulse rounded-3xl bg-edge/70" />
+        <div className="mt-6 space-y-3">{[0, 1, 2].map((k) => <div key={k} className="h-14 animate-pulse rounded-2xl bg-card" />)}</div>
+        <p className="mt-6 text-center text-[14px] text-dim">Planning your route…</p>
+      </main>
+    )
+  }
 
   const steps = data.steps || []
   const arrived = i >= steps.length
@@ -157,197 +172,190 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   // The backend reports real meters as floats (e.g. 12.345); show whole meters.
   const remaining = Math.round(steps.slice(i).reduce((a, s) => a + (s.meters || 0), 0))
   const mins = Math.max(1, Math.round((data.est_seconds * (remaining / (data.total_meters || 1))) / 60))
-  const riseClass = reduced ? '' : 'rise'
-
-  // Full-screen floor-change card for elevator/stairs steps.
-  if (!arrived && isVertical(kind)) {
-    const badge = floorBadge(step.instruction)
-    // Plain move label + direction of travel, derived from the step kind and the
-    // destination level (never invented). "Go up" / "Go down" come from the
-    // current vs. target floor so the hero reads clearly.
-    const stairDir = verticalDir(step.node, step.instruction)
-    const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
-    const vMove = moveLabel(kind, levelName)
-    const prettyInstruction = prettifyLandmark(step.instruction, roomLabels[step.node])
-    return (
-      <main className={`${riseClass} flex flex-1 flex-col`}>
-        <div className="mt-4 flex gap-1">
-          {steps.map((_, k) => <span key={k} className={`h-1.5 flex-1 rounded-full ${k < i ? 'bg-scarlet' : k === i ? 'bg-scarlet/50' : 'bg-line'}`} />)}
-        </div>
-        {/* Dark, immersive "moment" so a floor change reads as a distinct event. */}
-        <section key={i} className={`${stepAnim} mt-4 flex flex-1 flex-col items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-b from-ink to-scarlet-dark p-6 text-center text-paper shadow-[0_24px_50px_-20px_rgba(26,20,20,.7)]`}>
-          {badge && (
-            <span className="mb-6 flex h-28 w-28 flex-col items-center justify-center rounded-3xl bg-paper/10 ring-1 ring-paper/20">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-paper/70">Floor</span>
-              <span className="font-display text-5xl font-extrabold leading-none">{badge}</span>
-            </span>
-          )}
-          {/* Hero: large up/down arrow for the vertical move (relative, not a
-              compass). Falls back to the elevator/stairs glyph when we can't tell. */}
-          <DirectionArrow kind={kind} dir={stairDir} aria={arrowAria(kind)} onPaper />
-          <p className="mt-6 text-sm font-semibold uppercase tracking-wider text-paper/80">Change floors</p>
-          <p className="mt-2 font-display text-4xl font-extrabold leading-none tracking-tight">{vMove}</p>
-          <p className="mt-3 text-base font-medium text-paper/85">{prettyInstruction}</p>
-        </section>
-        <div className="space-y-3 pt-6">
-          <div className="grid grid-cols-[1fr_2fr] gap-3">
-            <button onClick={() => go(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Back</button>
-            <button onClick={() => go(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{i === steps.length - 1 ? 'I’m here' : 'Done'}</button>
-          </div>
-          <button onClick={onRestart} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">Lost? Snap again</button>
-        </div>
-      </main>
-    )
-  }
-
-  // Words-only context for the current step (no map): the landmark we're heading
-  // toward, the next step preview, and the current floor — all derived from the
-  // backend's own data.
-  // Landmark context, reworded for DISPLAY only (corridor -> hallway, etc.).
+  const destText = destinationLabel(resolvedDest, roomLabels)
+  const floorHere = step ? stepFloorName(step.node) : ''
+  // Plain move label from the step kind, then ONE supporting line: the landmark the
+  // backend names, or its own (display-reworded) instruction when it names none.
+  // We never invent a turn or distance the backend didn't give. Landmarks are reworded for DISPLAY only.
   const toward = step ? prettifyLandmark(headingToward(step.instruction), roomLabels[step.node]) : ''
   const nextStep = steps[i + 1]
   const nextKind = nextStep ? stepKind(nextStep.instruction) : null
   const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction), roomLabels[nextStep.node]) : ''
-  const floorHere = step ? stepFloorName(step.node) : ''
-  const destText = destinationLabel(resolvedDest, roomLabels)
-  // Plain move label from the step kind — the "points you the right way" cue. For
-  // a clean primary line we lead with this move, then the reworded landmark. We
-  // never invent a turn/distance the backend didn't give; the raw instruction is
-  // kept as supporting text below.
-  const move = kind ? moveLabel(kind) : ''
-  const primary = toward ? `${move} toward ${toward.toLowerCase()}` : move
+  const vertical = !arrived && isVertical(kind)
+  const badge = vertical ? floorBadge(step.instruction) : null
+  const stairDir = vertical ? verticalDir(step.node, step.instruction) : ''
+  const levelName = badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : ''
+  const move = vertical ? moveLabel(kind, levelName) : kind ? moveLabel(kind) : ''
+  const detail = vertical
+    ? prettifyLandmark(step.instruction, roomLabels[step.node])
+    : toward ? `toward ${toward}` : (step ? prettifyLandmark(step.instruction, roomLabels[step.node]) : '')
+
+  if (arrived) {
+    return (
+      <main className="rise flex flex-1 flex-col">
+        <div className="mt-2 flex items-center gap-4 rounded-3xl bg-fg px-5 py-5 text-ink shadow-[var(--shadow-float)]">
+          <Icon name="flag" size={34} strokeWidth={2.2} />
+          <div><p className="font-display text-[24px] font-bold leading-tight">You’ve arrived</p><p className="text-[15px] text-ink/65">{destText}</p></div>
+        </div>
+        <Sheet className="items-center text-center">
+          <PawBurst size={72} className="mt-4" />
+          <p className="font-display mt-4 text-[26px] font-bold">{destText}. Good dog.</p>
+          <p className="mt-1 text-[15px] text-dim">{Math.round(data.total_meters)} m walked{accessible ? ' · elevators only' : ''}</p>
+          <Button onClick={onRestart} className="mt-6 w-full">Find another room</Button>
+          <TextAction onClick={() => go(steps.length - 1)} className="mt-1">See the last step again</TextAction>
+        </Sheet>
+      </main>
+    )
+  }
+
+  const arrowOf = (k, dir) => (isVertical(k) ? (dir === 'up' ? 'up' : dir === 'down' ? 'down' : k) : k)
+  const label = (st) => {
+    const kd = stepKind(st.instruction)
+    const t = prettifyLandmark(headingToward(st.instruction), roomLabels[st.node])
+    return { kd, title: isVertical(kd) ? moveLabel(kd, '') : moveLabel(kd), sub: isVertical(kd) ? prettifyLandmark(st.instruction, roomLabels[st.node]) : (t ? `toward ${t.toLowerCase()}` : '') }
+  }
+  const floorsOnRoute = [...new Set(steps.map((st) => stepFloorName(st.node)).filter(Boolean))]
+  // A typed starting room reads as "Room 263"; a matched spot uses its place name.
+  const fromText = /^[a-z]?\d+[a-z]?$/i.test(String(from)) ? `Room ${String(from).toUpperCase()}` : (spotName(from, roomLabels) || from)
 
   return (
-    <main className={`${riseClass} flex flex-1 flex-col`}>
-      {/* Journey overview: from → to in words, distance + time, floor badge. */}
-      <section className="mt-4 rounded-2xl border border-line bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 text-sm text-muted">
-            <span className="font-medium text-ink">{spotName(from, roomLabels) || from}</span>
-            <span className="mx-1.5" aria-hidden>→</span>
-            <span className="font-medium text-ink">{destText}</span>
-          </p>
-          {accessible && <span className="shrink-0 rounded-full bg-ink/5 px-2.5 py-0.5 text-xs font-medium">♿ Elevators only</span>}
+    <main className="rise flex flex-1 flex-col">
+      <div className="relative flex min-h-[56px] items-center justify-center">
+        <button onClick={onRestart} aria-label="Exit route" className={`lg absolute left-0 flex h-11 w-11 items-center justify-center rounded-full ${focusRing}`}><Icon name="back" size={22} /></button>
+        <h1 className="font-display px-12 text-center text-[26px] font-bold leading-tight">To {destText}</h1>
+      </div>
+
+      {/* Summary card: your photo, where you started, distance and time. */}
+      <section className="glass mt-3 overflow-hidden rounded-[26px]">
+        <div className="flex items-center gap-4 p-3">
+          {photo?.url
+            ? <img src={photo.url} alt="Your hallway photo" className="h-[88px] w-[104px] shrink-0 rounded-2xl object-cover" />
+            : <span className="flex h-[88px] w-[104px] shrink-0 items-center justify-center rounded-2xl bg-fg/10"><Icon name="door" size={30} /></span>}
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-dim">Destination</p>
+            <p className="font-display truncate text-[22px] font-bold leading-tight">{destText}</p>
+            <p className="truncate text-[13px] text-dim">From {fromText}</p>
+            <p className="mt-1 text-[13px] tabular-nums"><span key={remaining} className="value-in">{remaining} m</span> · about {mins} min</p>
+          </div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
-          {floorHere && <span className="rounded-full bg-scarlet/10 px-2.5 py-0.5 text-scarlet">{floorHere}</span>}
-          <span className="rounded-full bg-ink/5 px-2.5 py-0.5 text-muted">{remaining} m left · ~{mins} min</span>
-          <span className="rounded-full bg-ink/5 px-2.5 py-0.5 text-muted">{Math.round(data.total_meters)} m total</span>
+        {/* The route, outlined while you walk it: done steps solid, this step outlined, the rest faint. */}
+        <div className="flex items-center gap-1.5 px-3 pb-3" role="img" aria-label={`Route: step ${i + 1} of ${steps.length} to ${destText}`}>
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-fg" />
+          {steps.map((_, k) => (
+            <span key={k} className={`relative h-2 flex-1 overflow-hidden rounded-full ${k < i ? 'bg-fg' : k === i ? 'ring-[1.5px] ring-fg' : 'ring-1 ring-fg/25'}`}>
+              {k === i && <span className="route-now absolute inset-y-0 left-0 rounded-full bg-fg/70" />}
+            </span>
+          ))}
+          <Icon name="flag" size={15} className="shrink-0" />
+        </div>
+        <div className="flex items-center gap-2 border-t border-fg/10 px-3 py-2.5">
+          {floorsOnRoute.map((f) => <span key={f} className="rounded-full bg-fg/10 px-2.5 py-1 text-[12px] font-medium">{f}</span>)}
+          {accessible && <span className="inline-flex items-center gap-1 rounded-full bg-fg/10 px-2.5 py-1 text-[12px] font-medium"><Icon name="elevator" size={13} />Elevators only</span>}
+          <button onClick={onRestart} className={`lg ml-auto h-9 shrink-0 rounded-full px-4 text-[13px] font-semibold ${focusRing}`}>Snap again</button>
         </div>
       </section>
 
-      <div className="mt-4 flex gap-1">
-        {steps.map((_, k) => <span key={k} className={`h-1.5 flex-1 rounded-full ${k < i ? 'bg-scarlet' : k === i ? 'bg-scarlet/50' : 'bg-line'}`} />)}
-      </div>
+      {/* The move to make now. Tap it when you get there. */}
+      <button key={i} type="button" onClick={() => go(i + 1)} aria-label={`Now: ${move}. ${detail}. Tap when you’re there.`}
+        className={`${stepAnim} lg-bright mt-3 flex items-center gap-4 rounded-[26px] p-4 text-left ${focusRing}`}>
+        <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-ink text-fg ${reduced ? '' : 'arrow-nudge'}`} style={NUDGE[vertical ? (stairDir || kind) : kind] || {}} role="img" aria-label={arrowAria(kind)}>
+          <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{glyph(arrowOf(kind, stairDir))}</svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] font-semibold uppercase tracking-wide text-ink/50">Now · step {i + 1} of {steps.length}</span>
+          <span className="font-display block text-[23px] font-bold leading-tight text-ink">{move}</span>
+          {detail && <span className="block text-[14px] leading-snug text-ink/65">{detail}</span>}
+        </span>
+        {step.meters > 0 && <span className="shrink-0 text-[16px] font-bold tabular-nums text-ink">{Math.max(1, Math.round(step.meters))} m</span>}
+      </button>
 
-      {!arrived ? (
-        <section key={i} className={`${stepAnim} mt-5 flex-1`}>
-          <p className="text-sm font-semibold uppercase tracking-wider text-scarlet">Step {i + 1} of {steps.length}</p>
-          {floorHere && <p className="text-xs font-medium text-muted">{floorHere}</p>}
-          {/* Hero: the big relative "next move" arrow + plain-language label. This is
-              the "points you the right way" cue the user asked for — a relative turn,
-              not a device compass. */}
-          <div className="mt-5 flex flex-col items-center text-center">
-            <DirectionArrow kind={kind} aria={arrowAria(kind)} />
-            <p className="mt-4 font-display text-5xl font-extrabold leading-none tracking-tight">{move}</p>
+      {vertical && (
+        <section className="glass mt-3 flex items-center gap-6 rounded-[26px] px-6 py-5">
+          <ElevatorTrack from={floorMark(floorOf(step.node).code)} to={badge === 'B1' ? 'LL' : badge} dir={stairDir} />
+          <div>
+            <p className="text-[14px] text-dim">{stairDir === 'down' ? 'Going down to' : stairDir === 'up' ? 'Going up to' : 'Change to'}</p>
+            <p className="font-display text-[30px] font-bold leading-tight">{levelName || 'next floor'}</p>
           </div>
-          {/* Clean, surroundings-driven primary line: move + reworded landmark. */}
-          <p className="mt-5 text-center font-display text-2xl font-bold leading-[1.12] tracking-tight">{primary}</p>
-          {/* Authoritative backend step text, reworded for display only. */}
-          <p className="mt-3 text-center text-sm text-muted">{prettifyLandmark(step.instruction, roomLabels[step.node])}</p>
-          {/* Surroundings in words: the landmark you're walking toward. */}
-          {toward && (
-            <p className="mt-4 text-center text-lg text-muted">
-              <span className="font-semibold text-ink">Heading toward:</span> {toward}
-            </p>
-          )}
-          {step.meters > 0 && <p className="mt-2 text-center text-lg text-muted">about {Math.max(1, Math.round(step.meters))} m</p>}
-          {/* One-step-ahead "what's next" preview — the privacy-safe substitute for a map. */}
-          {nextStep && (
-            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-line bg-ink/[.03] p-4">
-              <TurnIcon kind={nextKind} />
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Then</p>
-                <p className="mt-1 font-medium leading-snug">{moveLabel(nextKind)}{nextToward ? ` toward ${nextToward.toLowerCase()}` : ''}</p>
-              </div>
-            </div>
-          )}
-        </section>
-      ) : (
-        <section className={`${riseClass} mt-12 flex-1 text-center`}>
-          <PawBurst size={96} className="mx-auto" />
-          <p className="mt-4 font-display text-4xl font-extrabold">You’ve arrived.</p>
-          <p className="mt-2 text-muted">{destText}. Good dog.</p>
         </section>
       )}
 
-      <div className="space-y-3 pt-6">
-        {!arrived ? (
-          <div className="grid grid-cols-[1fr_2fr] gap-3">
-            <button onClick={() => go(Math.max(0, i - 1))} disabled={i === 0} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Back</button>
-            <button onClick={() => go(i + 1)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{i === steps.length - 1 ? 'I’m here' : 'Next'}</button>
+      {/* The whole trip as a timeline, markers down the left. */}
+      <ol className="mt-5" aria-label="Directions">
+        {[{ marker: 'Start', title: fromText, sub: 'Where you are now', icon: 'pin', state: 'done' },
+          ...steps.map((st, k) => { const l = label(st); return { marker: String(k + 1), title: l.title, sub: [l.sub, st.meters > 0 ? `${Math.max(1, Math.round(st.meters))} m` : ''].filter(Boolean).join(' · '), glyphKind: l.kd, k, state: k < i ? 'done' : k === i ? 'now' : 'next' } }),
+          { marker: 'End', title: destText, sub: floorsOnRoute[floorsOnRoute.length - 1] || '', icon: 'flag', state: 'next' }]
+          .map((row, n, all) => (
+          <li key={n} className="flex gap-3">
+            <div className="flex w-11 shrink-0 flex-col items-center">
+              <span className={`text-[11px] font-semibold ${row.state === 'now' ? 'text-fg' : 'text-dim'}`}>{row.marker === 'Start' || row.marker === 'End' ? row.marker : 'Step'}</span>
+              <span className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-bold tabular-nums ${row.state === 'now' ? 'bg-fg text-ink' : 'bg-fg/10'}`}>
+                {row.marker === 'Start' || row.marker === 'End' ? <Icon name={row.icon} size={15} /> : row.marker}
+              </span>
+              {n < all.length - 1 && <span aria-hidden className={`mt-1 w-px flex-1 ${row.state === 'done' ? 'bg-fg/60' : 'bg-fg/15'}`} />}
+            </div>
+            <button type="button" disabled={row.k === undefined} onClick={() => row.k !== undefined && go(row.k)}
+              className={`glass mb-3 flex min-h-[64px] flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-opacity ${row.state === 'now' ? 'ring-2 ring-fg' : row.state === 'done' ? 'opacity-55' : ''} ${focusRing}`}>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fg/10">
+                {row.glyphKind
+                  ? <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{glyph(row.glyphKind)}</svg>
+                  : <Icon name={row.icon} size={19} />}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-semibold">{row.title}</span>
+                {row.sub && <span className="block text-[13px] text-dim">{row.sub}</span>}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+      <div className="h-36" aria-hidden />
+
+      {/* Trip sheet: time, distance, and the controls. */}
+      <BottomBar>
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-[22px] font-bold leading-tight text-fg tabular-nums" aria-live="polite">
+              <span key={mins} className="value-in">{mins} min</span>
+            </p>
+            <p className="truncate text-[14px] text-dim tabular-nums">
+              <span key={remaining} className="value-in value-in-late">{remaining} m</span> · {floorHere ? `${floorHere} · ` : ''}Arrive {destText}{accessible ? ' · Elevators only' : ''}
+            </p>
           </div>
-        ) : (
-          <button onClick={onRestart} className="min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Find another room</button>
-        )}
-        {!arrived && <button onClick={onRestart} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">Lost? Snap again</button>}
-      </div>
+          <button onClick={() => go(Math.max(0, i - 1))} disabled={i === 0} aria-label="Previous step"
+            className={`lg flex h-12 w-12 shrink-0 items-center justify-center rounded-full disabled:opacity-35 ${focusRing}`}><Icon name="back" size={22} /></button>
+        </div>
+        <div className="mt-2 grid grid-cols-[1fr_2fr] gap-2">
+          <Button variant="secondary" onClick={onRestart}>Exit</Button>
+          <Button onClick={() => go(i + 1)}>{i === steps.length - 1 ? 'I’m here' : vertical ? 'Done' : 'Next'}</Button>
+        </div>
+      </BottomBar>
     </main>
   )
 }
 
-// The big, prominent RELATIVE directional arrow — the visual hero of the step.
-// Derived purely from the step kind (and, for vertical moves, an up/down `dir`),
-// it points the next move: left / right / straight-ahead / U-turn / up / down.
-//
-// NOTE: this is a RELATIVE turn arrow, NOT a device/magnetic compass. The app has
-// a hard no-sensors rule (no DeviceOrientationEvent, no geolocation), so it never
-// implies an absolute building bearing — only "your next move is this way". The
-// subtle nudge animation is gated by prefers-reduced-motion via index.css. The
-// box is comfortably >= 44px and the move is announced to screen readers.
-function DirectionArrow({ kind, dir = '', aria = '', onPaper = false }) {
-  const reduced = prefersReducedMotion()
-  // For vertical steps, resolve to an explicit up/down arrow when we know which
-  // way; otherwise fall back to the elevator/stairs glyph.
-  const arrowKind = isVertical(kind) ? (dir === 'up' ? 'up' : dir === 'down' ? 'down' : kind) : kind
-  // Gentle nudge in the direction of travel (purely decorative, relative only).
-  const nudge = {
-    left: { '--nudge-x': '-4px' }, right: { '--nudge-x': '4px' },
-    up: { '--nudge-y': '-4px' }, down: { '--nudge-y': '4px' },
-    continue: { '--nudge-y': '-4px' }, walk: { '--nudge-y': '-4px' },
-    around: { '--nudge-y': '-3px' },
-  }[arrowKind] || {}
-  const tone = onPaper ? 'bg-paper/10 text-paper ring-1 ring-paper/20' : 'bg-scarlet/10 text-scarlet'
+const NUDGE = {
+  left: { '--nudge-x': '-4px' }, right: { '--nudge-x': '4px' },
+  up: { '--nudge-y': '-4px' }, down: { '--nudge-y': '4px' },
+  continue: { '--nudge-y': '-4px' }, walk: { '--nudge-y': '-4px' },
+  around: { '--nudge-y': '-3px' },
+}
+
+// Vertical track between two floors; the car slides from one to the other.
+function ElevatorTrack({ from, to, dir }) {
+  const down = dir === 'down'
   return (
-    <span role="img" aria-label={aria} className={`flex h-28 w-28 items-center justify-center rounded-3xl ${tone}`}>
-      <span className={reduced ? '' : 'arrow-nudge'} style={nudge} aria-hidden>
-        <svg width={76} height={76} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {glyph(arrowKind)}
-        </svg>
-      </span>
-    </span>
+    <div className="relative h-28 w-10 shrink-0" aria-hidden>
+      <span className="absolute left-1/2 top-3 bottom-3 w-1 -translate-x-1/2 rounded-full bg-edge" />
+      <span className="absolute -left-5 top-1 text-[13px] font-bold text-dim">{down ? from : to}</span>
+      <span className="absolute -left-5 bottom-1 text-[13px] font-bold text-dim">{down ? to : from}</span>
+      <span className="elevator-car absolute left-1/2 h-7 w-7 -translate-x-1/2 rounded-full border-[3px] border-fg bg-fg shadow-[var(--shadow-float)]"
+        style={{ '--car-from': down ? '0px' : 'calc(100% - 28px)', '--car-to': down ? 'calc(100% - 28px)' : '0px' }} />
+    </div>
   )
 }
 
-// Large turn icon keyed to the step kind. Sized >= 44px; `big` variant for the
-// full-screen floor-change card. `bare` drops the own background/color so the
-// icon can sit inside a surface the caller styles (e.g. the floor-change card).
-function TurnIcon({ kind, big = false, bare = false }) {
-  const size = big ? 60 : 36
-  const svg = (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {glyph(kind)}
-    </svg>
-  )
-  if (bare) return <span aria-hidden>{svg}</span>
-  const box = big ? 'h-24 w-24' : 'h-14 w-14'
-  return (
-    <span className={`flex ${box} shrink-0 items-center justify-center rounded-2xl bg-scarlet/10 text-scarlet`} aria-hidden>
-      {svg}
-    </span>
-  )
-}
-
+// Arrow glyphs for each move. RELATIVE turns only (left/right/straight/around/up/down),
+// never a device compass: the app has a hard no-sensors rule.
 function glyph(kind) {
   switch (kind) {
     case 'left':

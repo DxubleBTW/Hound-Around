@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { locate } from '../api.js'
+import Icon from '../components/Icon.jsx'
+import PhotoLoader from '../components/PhotoLoader.jsx'
+import { Button, Sheet, TextAction, TopBar } from '../components/ui.jsx'
 
 export default function Locating({ photo, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
@@ -34,54 +37,63 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
     }
   }, [photo.blob, api, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const unknown = error?.code === 'unrecognized_location'
+  if (!error) {
+    return (
+      <PhotoLoader photoUrl={photo.url} flash={false}
+        title={stage === 'sending' ? 'Sending your photo…' : 'Finding your spot…'}
+        detail={stage === 'sending' ? 'Uploading it now. It’s deleted right after matching.' : `Comparing it to hallway views in ${buildingLabel}.`}
+        steps={[
+          { label: 'Photo ready', state: 'done' },
+          { label: 'Photo sent', state: stage === 'sending' ? 'now' : 'done' },
+          { label: 'Matching hallway views', state: stage === 'matching' ? 'now' : 'todo' },
+        ]} />
+    )
+  }
   return (
     <main className="rise flex flex-1 flex-col">
-      <div className="relative mt-4 aspect-[3/4] w-full overflow-hidden rounded-3xl bg-ink shadow-[0_24px_50px_-20px_rgba(26,20,20,.7)]">
-        <img src={photo.url} alt="Your hallway photo" className="h-full w-full object-cover opacity-80" />
-        {!error && (
-          <>
-            {/* Dark vignette keeps the scan motif legible over any photo. */}
-            <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-ink/30" />
-            <div className="scan-line absolute inset-x-0 h-1 bg-scarlet shadow-[0_0_24px_6px_rgba(204,0,0,.55)]" />
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 text-paper">
-              <span className="paw-trail inline-flex gap-1 text-lg" aria-hidden><span>🐾</span><span>🐾</span><span>🐾</span></span>
-              <span className="text-xs font-semibold uppercase tracking-wider text-paper/80">sniffing</span>
-            </div>
-          </>
-        )}
+      <TopBar onBack={onCancel} backLabel="Cancel and retake photo" title={error ? '' : 'Finding your spot'} />
+      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl bg-edge shadow-[var(--shadow-float)]">
+        <img src={photo.url} alt="Your hallway photo" className="h-full w-full object-cover" />
+        {!error && <div className="scan-line absolute inset-x-0 h-0.5 bg-white shadow-[0_0_0_1px_rgb(204_0_0/.8)]" />}
       </div>
 
-      {!error ? (
-        <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">
-            <span className="sniff inline-block">🐾</span> {stage === 'sending' ? 'Sending…' : 'Matching…'}
-          </p>
-          <p className="mt-2 text-muted">
-            {stage === 'sending'
-              ? 'Uploading your photo.'
-              : `Comparing your photo to hallway views in ${buildingLabel}.`}
-          </p>
-          {/* Pulsing match meter: a live "working" rhythm, not a real progress value. */}
-          <div className="mx-auto mt-6 flex max-w-[12rem] items-center justify-center gap-1.5" aria-hidden>
-            {Array.from({ length: 7 }).map((_, i) => (
-              <span
-                key={i}
-                className={`pulse-soft h-6 w-2 rounded-full ${stage === 'matching' ? 'bg-scarlet' : 'bg-line'}`}
-                style={{ animationDelay: `${i * 0.12}s` }}
-              />
-            ))}
+      <Sheet>
+        {!error ? (
+          <div role="status">
+            <div className="relative -mx-5 -mt-5 mb-5 h-1 overflow-hidden rounded-t-[28px] bg-tint"><span className="progress-bar rounded-full bg-fg" /></div>
+            <p className="font-display text-[22px] font-bold">{stage === 'sending' ? 'Sending your photo…' : 'Matching…'}</p>
+            <p className="mt-1 text-[15px] text-dim">
+              {stage === 'sending' ? 'Uploading your photo.' : `Comparing your photo to hallway views in ${buildingLabel}.`}
+            </p>
+            <ul className="mt-5 space-y-3 text-[15px]">
+              <li className="flex items-center gap-3">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-full ${stage === 'sending' ? 'bg-tint' : 'bg-fg text-ink'}`}>
+                  {stage === 'sending' ? <span className="pulse-soft h-2 w-2 rounded-full bg-fg" aria-hidden /> : <Icon name="check" size={16} strokeWidth={2.6} />}
+                </span>
+                <span>Photo sent</span>
+              </li>
+              <li className="flex items-center gap-3">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-full ${stage === 'matching' ? 'bg-tint' : 'bg-raise'}`}>
+                  <span className={`h-2 w-2 rounded-full ${stage === 'matching' ? 'pulse-soft bg-fg' : 'bg-faint'}`} aria-hidden />
+                </span>
+                <span className={stage === 'matching' ? '' : 'text-dim'}>Finding your spot</span>
+              </li>
+            </ul>
           </div>
-        </div>
-      ) : (
-        <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">{error.code === 'unrecognized_location' ? 'We don’t recognize this spot' : 'Hmm, no match yet'}</p>
-          <p role="alert" className="mt-2 break-words text-sm text-muted">{error.message || 'Please try another photo.'}</p>
-          <button onClick={error.code === 'unrecognized_location' ? onCancel : () => setAttempt((a) => a + 1)} className="mt-6 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{error.code === 'unrecognized_location' ? 'Retake photo' : 'Try again'}</button>
-          <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
-        </div>
-      )}
-
-      <button onClick={onCancel} className="mt-auto min-h-[44px] py-4 text-sm font-medium text-muted">Retake photo</button>
+        ) : (
+          <div>
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-tint text-rose"><Icon name="pin" size={22} /></span>
+            <p className="font-display mt-4 text-balance text-[22px] font-bold">{unknown ? 'We don’t recognize this spot' : 'Hmm, no match yet'}</p>
+            <p role="alert" className="mt-1 break-words text-[15px] text-dim">{error.message || 'Please try another photo.'}</p>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button onClick={unknown ? onCancel : () => setAttempt((a) => a + 1)} className="w-full">{unknown ? 'Take another photo' : 'Try again'}</Button>
+              <Button variant="secondary" onClick={onManual} className="w-full">Use the manual locator</Button>
+              {!unknown && <TextAction onClick={onCancel} className="self-center">Retake photo</TextAction>}
+            </div>
+          </div>
+        )}
+      </Sheet>
     </main>
   )
 }

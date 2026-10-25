@@ -3,8 +3,11 @@ import { test } from 'node:test'
 import { ALL_DESTS, DEST_GROUPS, destinationLabel, resolveDestination } from '../src/lib/destinations.js'
 
 test('every quick-pick is a verified-real value with a label', () => {
+  // Each value returned 200 from the live /route on 2026-10-25 (made-up places return 422).
   assert.deepEqual(ALL_DESTS.map((d) => d.value), [
-    '164', 'B62', '262', '263', '264', '265',
+    '164', '220', '262', '263', '264', '265', 'B62', 'B64A',
+    'F2_open_study', 'Spark',
+    'F1_cafe_entry',
     'F1_restrooms', 'F2_restrooms', 'B1_restrooms',
   ])
   for (const d of ALL_DESTS) {

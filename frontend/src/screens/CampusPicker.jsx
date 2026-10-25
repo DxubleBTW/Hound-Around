@@ -1,52 +1,57 @@
 import { useState } from 'react'
 import { CAMPUSES, buildingConfig } from '../lib/campuses.js'
+import Icon from '../components/Icon.jsx'
+import { TextAction, focusRing } from '../components/ui.jsx'
+
+// Public descriptions only: no floor plans, graph or private data.
+const ABOUT = {
+  'bu:cds': { address: '665 Comm Ave', floors: 'Lower level, Floor 1 and Floor 2 are mapped. More floors and buildings join as we film them.' },
+}
 
 export default function CampusPicker({ current, env, onSelect, onCancel }) {
   const [schoolId, setSchoolId] = useState(current.schoolId)
-  const [dragging, setDragging] = useState(false)
   const school = CAMPUSES.find((item) => item.id === schoolId) || CAMPUSES[0]
   const available = (item) => item.buildings.some((b) => buildingConfig(item.id, b.id, env)?.available)
-  const choose = (id) => {
-    const item = CAMPUSES.find((candidate) => candidate.id === id)
-    if (item && available(item)) setSchoolId(id)
-  }
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-6">
-      <h1 className="font-display text-3xl font-extrabold">Where are we exploring?</h1>
-      <p className="mt-3 text-muted">Drag a mascot onto the map—or tap a school.</p>
-      <div className="mt-6 flex gap-3 overflow-x-auto pb-3" aria-label="Schools">
-        {CAMPUSES.map((item) => (
-          <button key={item.id} disabled={!available(item)} aria-pressed={schoolId === item.id}
-            draggable={available(item)} onClick={() => choose(item.id)}
-            onDragStart={(event) => event.dataTransfer.setData('application/x-hound-school', item.id)}
-            onDragEnd={() => setDragging(false)}
-            className={`min-h-[88px] min-w-[140px] border-4 p-3 text-center font-semibold disabled:opacity-50 ${schoolId === item.id ? 'border-scarlet bg-scarlet/5' : 'border-line bg-white'}`}>
-            <svg aria-hidden="true" viewBox="0 0 16 16" width="48" height="48" className="mx-auto mb-2 text-scarlet" shapeRendering="crispEdges">
-              <path fill="currentColor" d="M2 2h3v3h6V2h3v9h-3v3H5v-3H2z" />
-              <path fill="white" d="M5 6h2v2H5zm4 0h2v2H9zM7 10h2v2H7z" />
-            </svg>
-            {item.name}{!available(item) && <span className="block text-xs">Coming soon</span>}
-          </button>
-        ))}
-      </div>
-      <section aria-label="Illustrated campus selection map"
-        onDragOver={(event) => { if (event.dataTransfer.types.includes('application/x-hound-school')) { event.preventDefault(); setDragging(true) } }}
-        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDragging(false) }}
-        onDrop={(event) => { event.preventDefault(); setDragging(false); choose(event.dataTransfer.getData('application/x-hound-school')) }}
-        className={`mt-4 flex min-h-[300px] flex-col justify-center border-4 p-5 ${dragging ? 'border-scarlet' : 'border-line'}`}
-        style={{ backgroundColor: '#eef2e1', backgroundImage: 'linear-gradient(#dbe4cb 1px,transparent 1px),linear-gradient(90deg,#dbe4cb 1px,transparent 1px)', backgroundSize: '24px 24px' }}>
-        <p role="status" className="mb-4 font-display text-xl font-bold">{dragging ? 'Drop to explore a school' : school.name}</p>
-        {school.buildings.map((building) => {
-          const config = buildingConfig(school.id, building.id, env)
-          return <button key={building.id} disabled={!config.available} onClick={() => onSelect(school.id, building.id)}
-            className="mb-3 min-h-[64px] border-4 border-ink bg-paper p-4 text-left font-semibold shadow-[4px_4px_0_#1A1414] disabled:opacity-50">
-            {config.available ? `Explore ${building.shortName || building.name}` : `${building.name} · Coming soon`}
-            <span className="mt-1 block text-sm font-normal">{building.name}</span>
-          </button>
-        })}
-        <p className="mt-4 text-xs text-muted">Illustrative scene, not a floor plan. Only configured buildings are available.</p>
+    <main className="rise mx-auto flex min-h-full max-w-md flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
+      <h1 className="font-display text-[28px] font-bold leading-tight">Choose a building</h1>
+      <p className="mt-2 text-[15px] leading-relaxed text-dim">Hound Around only works inside buildings we’ve filmed.</p>
+
+      {CAMPUSES.length > 1 && (
+        <div className="mt-6 flex gap-2 overflow-x-auto" role="group" aria-label="Schools">
+          {CAMPUSES.map((item) => (
+            <button key={item.id} disabled={!available(item)} aria-pressed={schoolId === item.id} onClick={() => setSchoolId(item.id)}
+              className={`min-h-[44px] shrink-0 rounded-full border px-4 text-[14px] disabled:opacity-40 ${schoolId === item.id ? 'border-fg bg-fg text-ink font-bold' : 'border-edge'} ${focusRing}`}>
+              {item.name}{!available(item) && ' · Coming soon'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <section className="mt-8">
+        <p className="flex items-center gap-2 text-[14px] font-bold"><Icon name="school" size={18} className="text-rose" />{school.name}</p>
+        <ul className="mt-3 space-y-2">
+          {school.buildings.map((building) => {
+            const config = buildingConfig(school.id, building.id, env)
+            const about = ABOUT[`${school.id}:${building.id}`]
+            return (
+              <li key={building.id}>
+                <button disabled={!config.available} onClick={() => onSelect(school.id, building.id)}
+                  className={`flex min-h-[76px] w-full items-center gap-3 rounded-3xl bg-card px-5 py-4 text-left shadow-[var(--shadow-float)] transition hover:shadow-md disabled:text-dim ${focusRing}`}>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-display block text-[20px] font-bold leading-tight">{building.shortName || building.name}</span>
+                    <span className="block text-[14px] text-dim">{building.name}{about ? `, ${about.address}` : ''}{!config.available ? ' · Coming soon' : ''}</span>
+                  </span>
+                  <Icon name="back" size={22} className="shrink-0 rotate-180 text-rose" />
+                </button>
+                {about && <p className="mt-3 text-[14px] leading-relaxed text-dim">{about.floors}</p>}
+              </li>
+            )
+          })}
+        </ul>
       </section>
-      <button onClick={onCancel} className="mt-auto min-h-[44px] py-4 font-semibold">Back to navigation</button>
+
+      <TextAction onClick={onCancel} className="mt-auto self-start">Back to navigation</TextAction>
     </main>
   )
 }
