@@ -1,15 +1,15 @@
 # Hound Around: where things stand
 
-Last updated Sat Oct 24, 2026, 11:30 PM, by David. Read this first, then `CLAUDE.md`, `docs/contract.md` and your file in
+Last updated Sun Oct 25, 2026, by David. Read this first, then `CLAUDE.md`, `docs/contract.md` and your file in
 `docs/roles/`. Coding agents: treat this as the current state of the project. Update it when something here changes.
 
 ## Live links
 
 | What | Where | State |
 | --- | --- | --- |
-| Front end | https://www.hound-around.tech (also hound-around-theta.vercel.app) | Up on the **real backend**, with the retake / choose-start screens |
-| Backend API | https://dribeiro0-hound-around.hf.space | **Live and healthy**: `/health` → `ok: true`, **3,263 vectors, 57 spots** (index v3, deployed Sun 12:09 AM: Friday + Saturday phone walks, confirmed room clips, 360 views). Dataset revision `ead1404`; previous `c9b5f76` |
-| Backend Space | huggingface.co/spaces/dribeiro0/hound-around | Public Docker Space (David's account), deployed from `main` at `0f7bf8d` (Space commit `84e4168`). Rejection code is live but **off** (no `recognition.json` yet) |
+| Front end | https://www.hound-around.tech (also hound-around-theta.vercel.app) | Up on the **real backend** with the dark wayfinding UI (PR #23); Vercel deploys `main` |
+| Backend API | https://dribeiro0-hound-around.hf.space | **Live and healthy**: `/health` → `ok: true`, **21,024 index rows, 57 spots** (matching upgrade, deployed Sun 12:40 AM: 7,008 frames × whole/left/right views, model `facebook/dinov2-small+pad224`). `/locate` 0.2–0.3 s. Dataset revision `bd4f841`; previous `ead1404` |
+| Backend Space | huggingface.co/spaces/dribeiro0/hound-around | Public Docker Space (David's account), deployed from `main` at `26c4a00` (Space commit `0c27f60`; previous `84e4168`). Code and index roll back **together**. Rejection code is live but **off** (no `recognition.json` yet) |
 | Private data | HF dataset `dribeiro0/hound-around-data` | `index.npz`, `graph.json`, `rooms.json`. Private; the Space reads it with a read-only `HF_TOKEN` secret |
 
 Live checks at 1:30 PM: two held-out hallway photos came back as the right spot in 0.7–0.9 s; an accessible route from
@@ -73,7 +73,7 @@ in-building number; the outsider test set will be the headline number.
 - The main errors are look-alike neighbors (the F2 east corridor E1–E4) and **B1 ↔ F2 confusion** from lighting and
   session effects. Room-sign OCR and the top-3 picker are the safety net.
 
-### Matching upgrade (branch `feat/matching-upgrade`, not deployed yet)
+### Matching upgrade (PR #24, live since Sun 12:40 AM)
 
 Same leave-one-video-out protocol on all of Saturday's phone footage as of ~1 AM Sun (4 datasets, 5,938 frames, 47 videos,
 1,758 at-spot queries; 360 footage not included). Plain top-10 vote, `ml/research/matching_sweep.py`:
@@ -147,6 +147,8 @@ private-data update steps, and remaining verification.
 
 | Priority | Task | Owner |
 | --- | --- | --- |
+| 1 | **Review + merge, then redeploy the Space:** #25 turn wording (45° turns, "Room 164 is on your right", honest first sign), #26 drawn route (`/route` adds `legs`; route screen opens on the path, one floor at a time; stacked on #25), #27 graph patch `remove_edges`. Jun: #25/#26 touch `api/routing.py` | Backend (Jun) + David |
+| 2 | **Graph reroute** (private, built locally, not uploaded yet): F1 west-restrooms corridor waypoint, F2 Spark walkway to the north corridor, F1 south stair ↔ `hall_e`. Cuts the worst detours (e.g. `F2_hall_w` → `hall_north` 52 → 26 m). Walk these three links on site; also check whether B1 `core_e` opens into the study space by the comm stair (not linked) | Anyone on site |
 | 1 | **Outsider test photos:** 30–50 photos from people not on the team, named `TEST_<spot>_NN.jpg`, to David's Drive. Needed for the go/no-go and the headline accuracy number | Anyone |
 | 3 | **Film F1 again**, a second session: 360° clips at every F1 spot, plus `class24`, `class48`, `south_stair`, `cafe_entry`, `restrooms_w`, `stair_east`. F1 is the demo floor | Data (David) |
 | 4 | F2 360° clips for one-video spots (`hall_w`, `hall_ne`, `hall_north`, `core_elev`, `core_e`, `csbuilds`, `open_study`, `class20`, `class48c`) and the missing `class48a`; close-ups of room-number signs | Data |
