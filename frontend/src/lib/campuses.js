@@ -10,6 +10,9 @@ export const CAMPUSES = [{
   id: 'bu', name: 'Boston University',
   buildings: [{
     id: 'cds', name: 'Center for Computing & Data Sciences', shortName: 'CDS',
+    address: '665 Commonwealth Ave',
+    // Floors in scope for routing (event access: lower level, 1 and 2), bottom to top.
+    floors: [{ code: 'B1', name: 'Lower level' }, { code: 'F1', name: 'Floor 1' }, { code: 'F2', name: 'Floor 2' }],
     apiEnv: 'VITE_API_URL', enabled: true,
     destinations: ALL_DESTS,
     destinationGroups: DEST_GROUPS,
@@ -38,7 +41,7 @@ export function buildingConfig(schoolId, buildingId, env = {}, campuses = CAMPUS
   const isDefault = schoolId === 'bu' && buildingId === 'cds'
   return { ...building, schoolId, schoolName: school.name, apiBase: base,
     available: building.enabled === true && (base ? validBase(base) : isDefault),
-    destinations: building.destinations || [], landmarks: building.landmarks || [],
+    destinations: building.destinations || [], landmarks: building.landmarks || [], floors: building.floors || [],
     roomLabels: building.roomLabels || {},
     resolvePlace: isDefault ? resolveDestination : passThrough }
 }

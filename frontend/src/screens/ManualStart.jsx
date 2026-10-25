@@ -1,44 +1,101 @@
 import { useState } from 'react'
+import { destinationLabel } from '../lib/destinations.js'
+import { destinationFloor } from '../lib/floors.js'
+import Icon from '../components/Icon.jsx'
+import FloorPicker from '../components/FloorPicker.jsx'
+import { BottomBar, Button, TextAction, TopBar, focusRing } from '../components/ui.jsx'
 
-// Room aliases already resolve through the existing /route endpoint. A typed
-// starting location is a routing choice, never a training label/correction.
-export default function ManualStart({ onStart, onCancel, landmarks = [], accessible = false }) {
+// Manual locator: pick your floor on the building, then the place you're next to.
+// Every listed place is a verified destination (lib/destinations.js) that the live
+// /route also accepts as a start (checked 2026-10-25). A typed room is passed
+// through for the backend to validate. A typed or chosen start is a routing
+// choice, never a training label/correction.
+const FLOOR_BY_NAME = { 'Lower level': 'B1', 'Floor 1': 'F1', 'Floor 2': 'F2' }
+
+function placeFloor(item, roomLabels) {
+  const code = destinationFloor(item.value, roomLabels).code
+  if (code) return code
+  return FLOOR_BY_NAME[item.floor] || FLOOR_BY_NAME[(item.label || '').split(' · ')[1]] || ''
+}
+
+export default function ManualStart({ onStart, onCancel, dest = '', accessible = false, roomLabels = {}, floors = [], groups = [], flyFrom = null }) {
+  const [floor, setFloor] = useState('')
   const [start, setStart] = useState('')
-  const room = start.trim()
+  const [typed, setTyped] = useState('')
+  const to = destinationLabel(dest, roomLabels)
+  const chosenFloor = floors.find((f) => f.code === floor)
+  const places = groups.flatMap((g) => g.items.map((item) => ({ item, g }))).filter(({ item }) => placeFloor(item, roomLabels) === floor)
+  const from = typed.trim() || start
+  const fromName = typed.trim()
+    ? (/^[a-z]?\d+[a-z]?$/i.test(typed.trim()) ? `Room ${typed.trim().toUpperCase()}` : typed.trim())
+    : (places.find(({ item }) => item.value === start)?.item.label || '').split(' · ')[0]
+  const pickFloor = (code) => { setFloor(code); setStart(''); setTyped('') }
+
   return (
-    <main className="flex flex-1 flex-col pt-8">
-      <form className="flex flex-1 flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (room) onStart(room) }}>
-        <div className="space-y-2.5">
-          <h1 className="font-display text-[38px] font-semibold leading-[1.02]">Which room are you next to?</h1>
-          <p className="text-[17px] leading-snug text-mist">Read the number on the nearest door. No photo needed.</p>
-        </div>
-        <div>
-          <label className="text-sm text-mist" htmlFor="manual-start">Room number</label>
-          <div className="flex items-center gap-3.5 border-b-2 border-snow pb-1">
-            <span aria-hidden className="h-3 w-3 shrink-0 rounded-full bg-here" />
-            <input id="manual-start" value={start} onChange={(event) => setStart(event.target.value)}
-              placeholder="263" autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent font-display text-[64px] font-semibold leading-none text-snow outline-none placeholder:text-[#3A3A3A]" />
+    <main className="flex flex-1 flex-col pb-32">
+      <div className="arrive-late"><TopBar onBack={onCancel} backLabel="Back to the start screen" title="Manual locator" /></div>
+
+      <header className="arrive-late mt-1 text-center">
+        <p className="font-display text-[26px] font-bold leading-tight">
+          <span key={floor || 'none'} className="value-in">{chosenFloor ? `Where on ${chosenFloor.name}?` : 'Which floor are you on?'}</span>
+        </p>
+        <p className="mt-1 text-[14px] text-dim">
+          <span key={`d${floor}`} className="value-in value-in-late">{chosenFloor ? 'Choose what you’re standing next to.' : 'Tap your floor’s name beside the building.'}</span>
+        </p>
+      </header>
+
+      <div className="relative -mx-5 mt-1 h-[min(380px,46vh)] text-fg">
+        <FloorPicker floors={floors} selected={floor} onSelect={pickFloor} from={flyFrom} />
+      </div>
+
+      <p className="arrive-later mt-2 text-center text-[12px] text-faint">Drag the building to look up the tower. Floors 3 and up aren’t in this demo.</p>
+
+      {chosenFloor && (
+        <section key={floor} className="rise mt-6" aria-labelledby="near-title">
+          <h2 id="near-title" className="text-[13px] font-semibold uppercase tracking-[.08em] text-dim">On {chosenFloor.name}</h2>
+          <ul className="mt-1">
+            {places.map(({ item, g }) => {
+              const [title] = (item.label || '').split(' · ')
+              const on = !typed.trim() && start === item.value
+              return (
+                <li key={item.value}>
+                  <button type="button" onClick={() => { setStart(item.value); setTyped('') }} aria-pressed={on}
+                    className={`-mx-2 flex min-h-[60px] w-[calc(100%+1rem)] items-center gap-4 rounded-2xl px-2 text-left transition-colors ${on ? 'bg-tint' : 'hover:bg-raise'} ${focusRing}`}>
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${on ? 'pop bg-fg text-ink' : 'bg-raise text-dim'}`}><Icon name={g.icon || 'door'} size={20} /></span>
+                    <span className="min-w-0 flex-1 border-b border-edge/70 py-3">
+                      <span className="block text-[16px] font-semibold">{title}</span>
+                      <span className="block text-[14px] text-dim">{[item.note, g.title !== title && g.title].filter(Boolean).join(' · ')}</span>
+                    </span>
+                    {on && <span className="pop shrink-0"><Icon name="check" size={20} strokeWidth={2.4} className="text-rose" /></span>}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+
+          <label htmlFor="manual-start" className="mt-5 block text-[14px] font-semibold">Not listed? Type the number on the nearest door</label>
+          <div className="glass mt-2 flex h-[52px] items-center gap-3 rounded-full px-4 focus-within:ring-2 focus-within:ring-fg">
+            <Icon name="door" size={20} className="shrink-0 text-dim" />
+            <input id="manual-start" value={typed} onChange={(e) => setTyped(e.target.value)}
+              placeholder="e.g. 263 or B62" inputMode="text" autoComplete="off"
+              className="h-full min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-dim" />
           </div>
-        </div>
-        {room && <p className="enter text-[17px] leading-snug">We’ll route you from Room {room}{accessible ? ', using elevators only' : ''}.</p>}
-        {landmarks.length > 0 && (
-          <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm text-mist">Or choose a landmark</legend>
-            {landmarks.map((landmark) => (
-              <button key={landmark.spot} type="button" onClick={() => onStart(landmark.spot)}
-                className="press min-h-[52px] w-full rounded-sm bg-panel px-4 text-left">
-                {landmark.label}, {landmark.floor === -1 ? 'Lower level' : `Floor ${landmark.floor}`}
-              </button>
-            ))}
-          </fieldset>
+          <p className="mt-4 flex items-center gap-2 text-[12px] text-dim"><Icon name="lock" size={14} />Typing a room doesn’t teach the photo matcher. Only a confirmed photo does.</p>
+        </section>
+      )}
+
+      <TextAction onClick={onCancel} className="arrive-later mt-4 self-center">Use the camera instead</TextAction>
+
+      <BottomBar>
+        <div className="arrive-later">
+        {from && to && (
+          <p className="mb-2 text-center text-[14px] text-dim">
+            From <span key={from} className="value-in font-semibold text-fg">{fromName}</span> <span aria-hidden>→</span> <span className="font-semibold text-fg">{to}</span>{accessible ? ', elevators only' : ''}
+          </p>
         )}
-        <p className="text-[15px] leading-snug text-mist">Typing a room doesn’t teach the photo matcher. Only a confirmed photo does.</p>
-        <div className="mt-auto space-y-2">
-          <button disabled={!room} className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night disabled:opacity-40">Get directions</button>
-          <button type="button" onClick={onCancel} className="min-h-[44px] w-full text-base underline underline-offset-[3px]">Back to camera</button>
+        <Button onClick={() => from && onStart(from)} disabled={!from} className="w-full"><Icon name="walk" size={19} />Get directions</Button>
         </div>
-      </form>
+      </BottomBar>
     </main>
   )
 }

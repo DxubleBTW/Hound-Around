@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
+import Icon from '../components/Icon.jsx'
+import { Button, Sheet, TextAction } from '../components/ui.jsx'
 
 // The first photo wasn't conclusive (look-alike hallways, identical elevator
 // lobbies). A photo facing the other way usually settles it: the backend adds
@@ -34,29 +36,26 @@ export default function SecondPhoto({ photo, onPhoto, onSkip, onManual }) {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 pt-6">
-      <div className="flex items-center gap-5">
-        <img src={photo.url} alt="Your first photo" className="h-28 w-[84px] shrink-0 rounded-[2px] object-cover opacity-70" />
+    <main className="rise flex flex-1 flex-col">
+      <div className="mt-4 flex items-center justify-center gap-5">
+        <img src={photo.url} alt="Your first photo" className="h-36 w-[108px] rounded-2xl object-cover opacity-70 shadow-[var(--shadow-float)]" />
         <TurnAround />
       </div>
-      <div className="space-y-2.5">
-        <h2 className="font-display text-[38px] font-semibold leading-[1.02]">Almost. Turn around and snap once more</h2>
-        <p className="text-[17px] leading-snug text-mist">
-          A few hallways here look alike. A photo facing the other way usually tells them apart.
-        </p>
-        {hint && <p role="alert" className="text-base">{hint}</p>}
-      </div>
-      <div className="mt-auto space-y-2">
-        <button onClick={() => input.current?.click()} disabled={busy}
-          className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night disabled:opacity-60">
-          {busy ? 'Preparing…' : 'Take the second photo'}
-        </button>
-        <div className="flex justify-between gap-4">
-          <button onClick={onSkip} className="min-h-[44px] text-base underline underline-offset-[3px]">Skip, show the closest spots</button>
-          <button onClick={onManual} className="min-h-[44px] text-right text-base underline underline-offset-[3px]">Type a room</button>
+      <Sheet>
+        <p className="font-display text-[26px] font-bold leading-tight">Almost. Turn around and snap once more</p>
+        <p className="mt-1.5 text-[15px] text-dim">A few hallways here look alike. A photo facing the other way usually tells them apart.</p>
+        {hint && <p role="alert" className="mt-3 rounded-xl bg-tint px-4 py-3 text-[14px]">{hint}</p>}
+        <div className="mt-6 flex flex-col gap-2">
+          <Button onClick={() => input.current?.click()} disabled={busy} className="w-full">
+            <Icon name="camera" size={20} />{busy ? 'Preparing…' : 'Take the second photo'}
+          </Button>
+          <div className="flex justify-between gap-4">
+            <TextAction onClick={onSkip}>Skip, show the closest spots</TextAction>
+            <TextAction onClick={onManual}>Use the manual locator</TextAction>
+          </div>
         </div>
         <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
-      </div>
+      </Sheet>
     </main>
   )
 }
@@ -64,11 +63,12 @@ export default function SecondPhoto({ photo, onPhoto, onSkip, onManual }) {
 // A half-turn arrow: "face the other way".
 function TurnAround() {
   return (
-    <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden className="text-snow">
-      <path d="M7 18V9a5 5 0 0 1 10 0v6" />
-      <path d="M13.5 12.5L17 16l3.5-3.5" />
-      <circle cx="7" cy="19.5" r="1.4" fill="var(--color-here)" stroke="none" />
-    </svg>
+    <span className="lg flex h-24 w-24 items-center justify-center rounded-full" aria-hidden>
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7 18V9a5 5 0 0 1 10 0v6" />
+        <path d="M13.5 12.5L17 16l3.5-3.5" />
+        <circle cx="7" cy="19.5" r="1.4" fill="currentColor" stroke="none" />
+      </svg>
+    </span>
   )
 }

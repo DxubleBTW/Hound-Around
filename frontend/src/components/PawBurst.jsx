@@ -15,7 +15,7 @@ export default function PawBurst({ size = 72, className = '' }) {
         return (
           <span
             key={deg}
-            className="spark absolute block rounded-full bg-maroon-line"
+            className="spark absolute block rounded-full bg-fg"
             style={{
               width: Math.max(4, size * 0.07),
               height: Math.max(4, size * 0.07),
@@ -26,7 +26,7 @@ export default function PawBurst({ size = 72, className = '' }) {
           />
         )
       })}
-      <span className={reduced ? '' : 'burst'}><Paw size={size * 0.8} color="#B0384A" /></span>
+      <span className={`${reduced ? '' : 'burst'} text-rose`}><Paw size={size * 0.8} /></span>
     </span>
   )
 }

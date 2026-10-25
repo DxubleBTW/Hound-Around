@@ -15,27 +15,52 @@ import { floorOf, spotName } from './spots.js'
 
 // Grouped quick-picks. `value` is what we send to /route's `to`; `label` is the
 // human text on the chip.
+// Each group's places were checked against the live /route endpoint on
+// 2026-10-25 (200, while made-up places return 422). Names come from the route's
+// own final step or docs/STATUS.md. `note` is a short public description.
+// `details` are the bullets shown when a place is chosen. Same sourcing rule: only
+// what the route or docs/STATUS.md says. Room features (projector, whiteboards,
+// outlets) go here only after someone has checked that room on site.
 export const DEST_GROUPS = [
   {
-    title: 'Popular',
+    title: 'Top destinations',
+    icon: 'flag',
     items: [
-      { value: '164', label: 'Room 164' },
-      { value: 'B62', label: 'Room B62' },
-      { value: '262', label: 'Room 262' },
-      { value: '263', label: 'Room 263' },
-      { value: '264', label: 'Room 264' },
-      { value: '265', label: 'Room 265' },
+      { value: '164', label: 'Room 164', note: 'Opening & closing ceremony', details: ['Opening and closing ceremonies are held here'] },
+      { value: '220', label: 'Room 220', note: 'CS Builds', floor: 'Floor 2', details: ['CS Builds room'] },
+      { value: '262', label: 'Room 262', note: 'Hacking room', details: ['Hacking room for the event', 'Door number still being confirmed on site'] },
+      { value: '263', label: 'Room 263', note: 'Hacking room', details: ['Hacking room for the event', 'Door number still being confirmed on site'] },
+      { value: '264', label: 'Room 264', note: 'Hacking room', details: ['Hacking room for the event', 'Door number still being confirmed on site'] },
+      { value: '265', label: 'Room 265', note: 'Hacking room', details: ['Hacking room for the event', 'Door number still being confirmed on site'] },
+      { value: 'B62', label: 'Room B62', details: ['Door number still being confirmed on site'] },
+      { value: 'B64A', label: 'Room B64A', floor: 'Lower level' },
+    ],
+  },
+  {
+    title: 'Study spots',
+    icon: 'book',
+    items: [
+      { value: 'F2_open_study', label: 'Open student work area · Floor 2', note: 'Tables and space to work', details: ['Open work area for students', 'Routes to the work-area entrance'] },
+      { value: 'Spark', label: 'Spark incubator lab · Floor 2', note: 'West end of the corridor', details: ['Informal collaboration area at the west end of the corridor'] },
+    ],
+  },
+  {
+    title: 'Food & coffee',
+    icon: 'coffee',
+    items: [
+      { value: 'F1_cafe_entry', label: 'Café · Floor 1', note: 'Café entrance', details: ['Routes to the café entrance'] },
     ],
   },
   {
     title: 'Restrooms',
+    icon: 'restroom',
     items: [
       { value: 'F1_restrooms', label: 'Restrooms · Floor 1' },
       { value: 'F2_restrooms', label: 'Restrooms · Floor 2' },
       { value: 'B1_restrooms', label: 'Restrooms · Lower level' },
     ],
   },
-  // Classroom choices use physical door-number aliases in Popular above.
+  // Classroom choices use physical door-number aliases in Top destinations above.
   // Capacity-based internal nodes are not user-facing destinations.
 ]
 
@@ -103,6 +128,7 @@ export function destinationLabel(value, roomLabels = {}) {
   if (/^[a-z]?\d+[a-z]?$/i.test(raw)) return `Room ${raw.toUpperCase()}`
   // A node id we can format with spots.js (e.g. "F1_restrooms").
   if (/^[bf]\d?_/i.test(raw)) {
+    if (known) { const [name, floor] = known.label.split(' · '); return floor ? `${name} (${floor})` : name }
     const name = spotName(raw, roomLabels)
     const floor = floorOf(raw).name
     return floor && !name.includes(floor) ? `${name} (${floor})` : name
