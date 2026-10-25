@@ -1,17 +1,14 @@
 import Icon from './Icon.jsx'
 import { focusRing } from './ui.jsx'
-// Unsplash License photos (free, no attribution required), resized and bundled:
-//   study-aisle  unsplash.com/photos/1481627834876-b7833e8f5570
-//   lab          unsplash.com/photos/1517245386807-bb43f82c33c4
-//   cafe         unsplash.com/photos/1495474472287-4d71bcdd2085
-//   flag         unsplash.com/photos/1580582932707-520aed937b7b
-import studyAisle from '../assets/places/study-aisle.jpg'
-import lab from '../assets/places/lab.jpg'
-import cafe from '../assets/places/cafe.jpg'
-import hall from '../assets/places/flag.jpg'
-import book from '../assets/places/book.jpg'
-import coffee from '../assets/places/coffee.jpg'
-import restroom from '../assets/places/restroom.jpg'
+import { stockPhoto } from '../lib/stockPhotos.js'
+
+const studyAisle = stockPhoto('libraryAisle')
+const lab = stockPhoto('laptops')
+const cafe = stockPhoto('latte')
+const hall = stockPhoto('classroom')
+const book = stockPhoto('bookshelf')
+const coffee = stockPhoto('food')
+const restroom = stockPhoto('washroom')
 
 // A saved spot borrows its section's photo (or its own tile's), so it fits in.
 const SECTION_PHOTO = { flag: hall, book, coffee, restroom }

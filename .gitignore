@@ -9,8 +9,6 @@ data/
 *.heic
 *.pdf
 !docs/img/*.png
-# App images (stock photos for the destination tiles; never building photos)
-!frontend/src/assets/**/*.jpg
 
 # Large artifacts (index ships to the Space separately)
 *.npz
