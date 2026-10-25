@@ -551,6 +551,27 @@ def test_build_index_reads_pipeline_dataset_folders(tmp_path):
     assert counts == {'F1_a': 3}
 
 
+def test_build_index_caps_360_views_separately_from_phone_frames(tmp_path):
+    # 360 crops must not crowd phone frames out of a spot's cap; they get their own budget.
+    (tmp_path / 'graph.json').write_text(json.dumps(synthetic_graph()))
+    header = 'file,video,t_sec,label,label_source,in_graph,sharpness,dup_of_prev,status'
+    for ds, video, n in (('dataset', 'v1', 4), ('dataset_360', 'X360_001', 6)):
+        _ensure(tmp_path / ds / 'train' / 'F1_a')
+        lines = [header]
+        for i in range(n):
+            name = f'{ds}_{i}.jpg'
+            solid((255, 0, 0)).save(tmp_path / ds / 'train' / 'F1_a' / name)
+            lines.append(f'{name},{video},{i}.0,F1_a,voice,true,1800,false,keep')
+        (tmp_path / ds / 'labels.csv').write_text('\n'.join(lines) + '\n')
+    import ml.build_index as B
+    B.CAP_360_PER_SPOT, old = 2, B.CAP_360_PER_SPOT
+    try:
+        _, counts = B.build_index(tmp_path, embed_fn=FakeEmbedder(), cap=3)
+    finally:
+        B.CAP_360_PER_SPOT = old
+    assert counts == {'F1_a': 3 + 2}
+
+
 def test_app_reports_unready_when_index_missing(tmp_path, monkeypatch):
     # N07 end to end: no index -> /health 503 and /locate 503, never a guess.
     import sys

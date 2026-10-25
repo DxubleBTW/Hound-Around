@@ -35,6 +35,18 @@ test('prettifyLandmark handles empty and non-string input safely', () => {
   assert.equal(prettifyLandmark(null), '')
 })
 
+test('legacy backend capacity text is hidden without inventing door numbers', () => {
+  assert.equal(prettifyLandmark('Walk toward 48-seat classroom A'), 'Walk toward classroom')
+  assert.equal(prettifyLandmark('Turn right and walk toward East corridor by 48-seat rooms'),
+    'Turn right and walk toward East hallway by rooms')
+  assert.equal(prettifyLandmark('Walk toward Room 164'), 'Walk toward Room 164')
+  assert.equal(prettifyLandmark('Turn right and walk toward 48-person classroom west (door)', 'Room 262'),
+    'Turn right and walk toward Room 262 (door)')
+  assert.equal(prettifyLandmark('Walk toward 70-person classroom (door)', 'Room B62'),
+    'Walk toward Room B62 (door)')
+  assert.equal(prettifyLandmark('Walk toward 48-person classroom east (door)'), 'Walk toward classroom (door)')
+})
+
 test('moveLabel gives a plain-language relative move per step kind', () => {
   assert.equal(moveLabel('left'), 'Turn left')
   assert.equal(moveLabel('right'), 'Turn right')

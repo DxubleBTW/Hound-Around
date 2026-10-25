@@ -35,6 +35,10 @@ from PIL import Image
 from ml.embedder import DIM, INDEX_VIEWS, index_views, normalize
 
 CAP_PER_SPOT = 250
+# 360-camera views (datasets named *360*) get their own budget on top of the phone frames. Sharing the cap let
+# hundreds of 360 crops crowd out the phone frames that phone queries match best (top-3 at those spots 33% -> 19%);
+# added on top they were neutral overall and slightly better at their spots (LOVO, Sat night).
+CAP_360_PER_SPOT = 40
 REFILM_THRESHOLD = 20
 SEED = 1234
 VALID_FLOORS = (-1, 1, 2)
@@ -130,7 +134,9 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
     for spot in sorted(by_spot):
         if spot not in valid_nodes:
             continue
-        frames = even_sample(by_spot[spot], cap)
+        is_360 = [f for f in by_spot[spot] if '360' in Path(f).parent.parent.parent.name]
+        phone = [f for f in by_spot[spot] if f not in set(is_360)]
+        frames = even_sample(phone, cap) + even_sample(is_360, CAP_360_PER_SPOT)
         if not frames:
             continue
         images = [Image.open(f).convert('RGB') for f in frames]

@@ -20,7 +20,7 @@ function needsPicker(loc) {
   return loc.confidence < PICKER_THRESHOLD || floors.size > 1
 }
 
-export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building' }) {
+export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
@@ -84,7 +84,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
             : <p className="text-sm font-medium text-muted">You’re at</p>}
           {!picking && (
             <>
-              <h2 className="font-display text-3xl font-extrabold leading-tight">{spotName(loc.spot)}</h2>
+              <h2 className="font-display text-3xl font-extrabold leading-tight">{spotName(loc.spot, roomLabels)}</h2>
               <span className="mt-1 inline-block rounded-full bg-scarlet/10 px-2.5 py-0.5 text-sm font-semibold text-scarlet">
                 {floorName(loc.floor)}
               </span>
@@ -123,7 +123,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
                 {/* Vote bar fills proportionally to the strongest candidate. */}
                 <span aria-hidden className="grow-x absolute inset-y-0 left-0 bg-scarlet/5" style={{ width: `${Math.round((t.votes / maxVotes) * 100)}%`, animationDelay: `${i * 0.06}s` }} />
                 <span className="relative">
-                  <span className="block font-semibold">{spotName(t.spot)}</span>
+                  <span className="block font-semibold">{spotName(t.spot, roomLabels)}</span>
                   <span className="block text-sm text-muted">{floorName(floorNum(t.spot))}{i === 0 ? ' · best guess' : ''}</span>
                 </span>
                 <span className="relative text-sm font-medium text-muted">{saving === t.spot ? 'Saving…' : `${t.votes} votes`}</span>
@@ -148,7 +148,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
             )}
             <button onClick={() => onConfirm(failure.spot, null)} disabled={!!saving}
               className="min-h-[44px] w-full rounded-xl bg-scarlet py-3 font-semibold text-white disabled:opacity-60">
-              Continue from {spotName(failure.spot)}
+              Continue from {spotName(failure.spot, roomLabels)}
             </button>
           </div>
         )}

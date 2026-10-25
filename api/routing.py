@@ -1,5 +1,6 @@
 """Routes use verified graph edges; pixel coordinates supply direction only."""
 import math
+import re
 
 import networkx as nx
 
@@ -32,14 +33,29 @@ class Router:
                 reverse.pop('instruction', None)
                 self.graph.add_edge(b, a, **reverse)
         self.aliases = {}
+        self.room_numbers = {}
         for room in rooms:
             if room['node'] not in self.nodes:
                 raise ValueError('Room references unknown node')
+            number = str(room['room']).strip().upper()
+            if re.fullmatch(r'B?\d{2,3}[A-Z]?', number):
+                self.room_numbers.setdefault(room['node'], set()).add(number)
             for alias in (room['room'], room['name']):
                 key = alias.strip().casefold()
                 if key in self.aliases and self.aliases[key] != room['node']:
                     raise ValueError('Ambiguous room alias')
                 self.aliases[key] = room['node']
+
+    def node_label(self, node):
+        """Door aliases come from rooms.json; capacity IDs never imply room numbers."""
+        numbers = self.room_numbers.get(node['id'], set())
+        if len(numbers) == 1:
+            return f'Room {next(iter(numbers))}'
+        if re.search(r'_class\d+[a-z]?$', node['id']):
+            return 'Classroom (room number unconfirmed)'
+        label = node.get('label', node['id'])
+        return re.sub(r'\b\d+\s*[-–]?\s*(?:seat(?:er)?|person)\s+(classrooms?|rooms?)\b',
+                      r'\1', label, flags=re.IGNORECASE)
 
     def resolve(self, value):
         if value in self.nodes:
@@ -69,7 +85,7 @@ class Router:
             edge = graph[a][b]
             target = self.nodes[b]
             landmark = target.get('landmark')
-            label = target.get('label', b)
+            label = self.node_label(target)
             toward = f'{label} ({landmark})' if landmark else label
             if edge.get('vertical', False):
                 level = 'LL' if target['floor'] == -1 else str(target['floor'])
