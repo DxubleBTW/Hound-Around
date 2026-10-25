@@ -9,7 +9,10 @@ pairs with ``<data_dir>/dataset/train``), keeps ``status == keep``, embeds, and 
 - ``labels`` str ``[N]``
 - ``source`` str ``[N]`` = ``"video"``
 
-Each spot is capped at ~60 frames, sampled evenly across time with a fixed seed.
+Each spot is capped at 250 frames, sampled evenly across time with a fixed seed
+(60 -> 250: +2 top-1, +1 floor under leave-one-video-out; past 250 it is flat).
+Every frame adds one row per :data:`ml.embedder.INDEX_VIEWS` view (whole frame,
+left and right crop), all with the frame's label, so N = 3 x frames.
 Only spots that are nodes in ``graph.json`` on floors -1, 1 or 2 are included.
 Per-spot counts are printed, plus the re-film list (spots under 20 frames).
 
@@ -29,9 +32,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ml.embedder import DIM, normalize
+from ml.embedder import DIM, INDEX_VIEWS, index_views, normalize
 
-CAP_PER_SPOT = 60
+CAP_PER_SPOT = 250
 # 360-camera views (datasets named *360*) get their own budget on top of the phone frames. Sharing the cap let
 # hundreds of 360 crops crowd out the phone frames that phone queries match best (top-3 at those spots 33% -> 19%);
 # added on top they were neutral overall and slightly better at their spots (LOVO, Sat night).
@@ -113,7 +116,8 @@ def keep_frames(data_dir, exclude_videos=()):
 def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None):
     """Build and return ``(VectorIndex-like arrays)`` and write ``index.npz``.
 
-    Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed.
+    Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed
+    (each frame is ``len(INDEX_VIEWS)`` rows).
     ``embed_fn`` is injectable (fake in tests); defaults to DINOv2.
     """
     data_dir = Path(data_dir)
@@ -137,13 +141,14 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
             continue
         images = [Image.open(f).convert('RGB') for f in frames]
         try:
-            vectors = np.asarray(embed_fn(images), dtype=np.float32).reshape(-1, DIM)
+            views = [view for image in images for view in index_views(image)]
+            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(-1, DIM)
         finally:
             for image in images:
                 image.close()
         vecs_parts.append(normalize(vectors))
         labels.extend([spot] * vectors.shape[0])
-        counts[spot] = vectors.shape[0]
+        counts[spot] = len(frames)
 
     vecs = np.vstack(vecs_parts).astype(np.float16) if vecs_parts \
         else np.zeros((0, DIM), dtype=np.float16)
@@ -164,7 +169,7 @@ def _report(counts):
         print(f'  {spot}: {counts[spot]}')
     refilm = sorted(s for s, c in counts.items() if c < REFILM_THRESHOLD)
     total = sum(counts.values())
-    print(f'Total frames indexed: {total} across {len(counts)} spots')
+    print(f'Total frames indexed: {total} ({total * len(INDEX_VIEWS)} rows) across {len(counts)} spots')
     if refilm:
         print(f'Re-film list (< {REFILM_THRESHOLD} frames): {", ".join(refilm)}')
     else:

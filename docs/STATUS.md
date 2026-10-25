@@ -73,6 +73,23 @@ in-building number; the outsider test set will be the headline number.
 - The main errors are look-alike neighbors (the F2 east corridor E1–E4) and **B1 ↔ F2 confusion** from lighting and
   session effects. Room-sign OCR and the top-3 picker are the safety net.
 
+### Matching upgrade (branch `feat/matching-upgrade`, not deployed yet)
+
+Same leave-one-video-out protocol on all of Saturday's phone footage as of ~1 AM Sun (4 datasets, 5,938 frames, 47 videos,
+1,758 at-spot queries; 360 footage not included). Plain top-10 vote, `ml/research/matching_sweep.py`:
+
+| Config | Top-1 | Top-3 | Right floor | CPU ms/query |
+| --- | --- | --- | --- | --- |
+| Baseline: center crop, 60 frames/spot | 28.6% | 52.7% | 74.2% | ~215 |
+| + 250 frames/spot | 30.7% | 53.4% | 75.5% | ~215 |
+| + letterbox (no center crop) + left/right crop views in the index | **36.9%** | **59.4%** | **81.3%** | ~235 |
+
+The full shipped backend (confidence pooling, picker, OCR; `ml/research/backend_eval.py`), old → new:
+exact 29 → 37%, within 10 m 51 → 62%, right floor 74 → 81%, user success 55 → 66%, picker shown 68 → 52%,
+one correction learns 83 → 83% (correction weight scaled to 9 = 3 frames × 3 views), corrections hijacking another
+spot 3.7 → 2.9%. Tried and not better: native-aspect input (better floor, worse top-3), other vote sizes.
+Place-recognition descriptors (MegaLoc, BoQ) are wired into `ml/research/embed.py` but not measured yet.
+
 ## Changed behavior the team should know
 
 - **Confidence** is now the winner's votes plus votes for spots within 8 m on the same floor, / 10 (it was winner's

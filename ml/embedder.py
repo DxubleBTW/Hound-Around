@@ -5,6 +5,13 @@ Produces a 384-d, L2-normalized descriptor from the DINOv2-small **CLS token**
 comparable with cosine similarity (the top-10 voting scheme), and cheaper than
 pooling all patch tokens which helps the < 1 s CPU budget.
 
+Images are **letterboxed** onto a 224 x 224 square instead of the processor's
+default resize-256 + center-crop-224, which cut the sides off landscape training
+frames and the top/bottom off portrait phone photos. The index also stores a
+left and a right crop of every frame (:data:`INDEX_VIEWS`) so a narrow portrait
+query has a same-shaped view to match. Leave-one-video-out, both together:
+top-1 31 -> 37%, top-3 53 -> 59%, floor 76 -> 81% (ml/research/matching_sweep.py).
+
 The heavy dependencies (``torch``, ``transformers``) are imported **lazily**
 inside :class:`Dinov2Embedder`, so ``import ml.embedder`` succeeds without them
 and synthetic tests can inject a deterministic fake embedder instead.
@@ -19,7 +26,14 @@ from __future__ import annotations
 import numpy as np
 
 DIM = 384
-MODEL_NAME = 'facebook/dinov2-small'
+HF_MODEL = 'facebook/dinov2-small'
+# Identity of the descriptor (weights + preprocessing). Rejection thresholds and
+# correction contexts are bound to it, so a preprocessing change must change it.
+MODEL_NAME = f'{HF_MODEL}+pad224'
+SIDE = 224
+PAD_RGB = (124, 116, 104)  # ImageNet mean: padding normalizes to ~0
+# Index rows per training frame: (left, right) fractions of the width, None = whole frame.
+INDEX_VIEWS = (None, (0.0, 0.6), (0.4, 1.0))
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:
@@ -53,6 +67,25 @@ def as_embed_fn(fn):
     return embed
 
 
+def letterbox(image, side=SIDE):
+    """Scale an RGB PIL image to fit a ``side`` x ``side`` square and pad the rest (no pixels cropped)."""
+    from PIL import Image
+
+    scale = side / max(image.size)
+    resized = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                           Image.BICUBIC)
+    canvas = Image.new('RGB', (side, side), PAD_RGB)
+    canvas.paste(resized, ((side - resized.width) // 2, (side - resized.height) // 2))
+    return canvas
+
+
+def index_views(image):
+    """The :data:`INDEX_VIEWS` crops of one training frame, in order."""
+    width, height = image.size
+    return [image if view is None else image.crop((int(width * view[0]), 0, int(width * view[1]), height))
+            for view in INDEX_VIEWS]
+
+
 def _is_single(images) -> bool:
     """A single PIL image (not a list/tuple of images)."""
     return not isinstance(images, (list, tuple))
@@ -74,8 +107,8 @@ class Dinov2Embedder:
 
         self._torch = torch
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self._processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
-        self._model = AutoModel.from_pretrained(MODEL_NAME).to(self.device).eval()
+        self._processor = AutoImageProcessor.from_pretrained(HF_MODEL)
+        self._model = AutoModel.from_pretrained(HF_MODEL).to(self.device).eval()
 
     def __call__(self, images):
         single = _is_single(images)
@@ -83,7 +116,9 @@ class Dinov2Embedder:
         if not batch:
             return np.zeros((0, DIM), dtype=np.float32)
         torch = self._torch
-        inputs = self._processor(images=batch, return_tensors='pt').to(self.device)
+        batch = [letterbox(image.convert('RGB')) for image in batch]
+        inputs = self._processor(images=batch, do_resize=False, do_center_crop=False,
+                                 return_tensors='pt').to(self.device)
         with torch.inference_mode():
             outputs = self._model(**inputs)
             # CLS token is position 0 of the last hidden state (design §2).

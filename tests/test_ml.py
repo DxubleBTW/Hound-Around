@@ -390,17 +390,21 @@ def test_build_index_contract_format(tmp_path):
     rows.append('bad.jpg,v3,0.0,F1_a,card,true,10,false,reject_blurry,')
     (tmp_path / 'labels.csv').write_text('\n'.join(rows) + '\n')
 
-    from ml.build_index import build_index, CAP_PER_SPOT
-    out_path, counts = build_index(tmp_path, embed_fn=FakeEmbedder())
+    from ml.build_index import build_index
+    from ml.embedder import INDEX_VIEWS
+    out_path, counts = build_index(tmp_path, embed_fn=FakeEmbedder(), cap=60)
 
     assert out_path == tmp_path / 'index.npz'
     data = np.load(out_path, allow_pickle=False)
     assert data['vecs'].dtype == np.float16
     assert data['vecs'].shape[1] == DIM
     assert set(data['source'].tolist()) == {'video'}
-    assert counts['F1_a'] == CAP_PER_SPOT  # capped at ~60
+    assert counts['F1_a'] == 60  # capped
     assert counts['F1_b'] == 5 and counts['F2_c'] == 5
-    assert data['vecs'].shape[0] == CAP_PER_SPOT + 10
+    # every frame is stored as whole + left + right crop, all under its own label
+    assert len(data['labels']) == (60 + 5 + 5) * len(INDEX_VIEWS)
+    assert data['labels'].tolist().count('F1_b') == 5 * len(INDEX_VIEWS)
+    assert data['vecs'].shape[0] == len(data['labels'])
     # L2-normalized rows.
     norms = np.linalg.norm(data['vecs'].astype(np.float32), axis=1)
     assert np.allclose(norms, 1.0, atol=1e-2)
@@ -587,3 +591,19 @@ def test_app_reports_unready_when_index_missing(tmp_path, monkeypatch):
         assert client.get('/health').status_code == 503
         response = client.post('/locate', files={'image': ('q.jpg', _jpeg((255, 0, 0)), 'image/jpeg')})
         assert response.status_code == 503
+
+
+def test_letterbox_keeps_the_whole_image_and_pads_to_a_square():
+    # No center crop: a landscape frame keeps its full width, padding fills the rest.
+    from ml.embedder import PAD_RGB, SIDE, letterbox
+    image = Image.new('RGB', (1920, 1080), (255, 0, 0))
+    boxed = letterbox(image)
+    assert boxed.size == (SIDE, SIDE)
+    assert boxed.getpixel((0, SIDE // 2)) == (255, 0, 0)  # left edge is image, not cut away
+    assert boxed.getpixel((SIDE // 2, 0)) == PAD_RGB  # top is padding
+
+
+def test_index_views_are_whole_frame_plus_overlapping_side_crops():
+    from ml.embedder import index_views
+    views = index_views(Image.new('RGB', (1000, 500)))
+    assert [v.size for v in views] == [(1000, 500), (600, 500), (600, 500)]
