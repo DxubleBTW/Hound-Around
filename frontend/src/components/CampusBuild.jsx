@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { points, render } from '../lib/box3d.js'
 import { CDS_BOXES, STREET, STREET_VIEWBOX, STREET_YAW } from '../lib/cdsModel.js'
-import { prefersReducedMotion } from '../lib/motion.js'
+import { useReducedMotion } from '../lib/useReducedMotion.js'
 
 // The school picker's slot: empty until a school is chosen (tap or drop), then
 // its building assembles there, the CDS boxes dropping into place from the
@@ -15,7 +15,7 @@ const easeOut = (t) => 1 - Math.pow(1 - t, 3)
 
 export default function CampusBuild({ school }) {
   const [clock, setClock] = useState(0)
-  const still = prefersReducedMotion()
+  const still = useReducedMotion()
   const total = DROP_MS + STAGGER_MS * (CDS_BOXES.length - 1)
   useEffect(() => {
     if (!school) { setClock(0); return undefined }
