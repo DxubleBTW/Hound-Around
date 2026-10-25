@@ -5,7 +5,7 @@ Reads every ``<data_dir>/<dataset>/labels.csv`` the pipeline wrote (frames in
 pairs with ``<data_dir>/dataset/train``), keeps ``status == keep``, embeds, and writes
 ``<data_dir>/index.npz`` in the contract format:
 
-- ``vecs`` float16 ``[N, 384]`` (L2-normalized)
+- ``vecs`` float16 ``[N, D]`` (L2-normalized; D follows the embedder, or ``--pca K``)
 - ``labels`` str ``[N]``
 - ``source`` str ``[N]`` = ``"video"``
 - ``heading`` str ``[N]``: graph node the frame faces, ``''`` when unknown (optional; older indexes lack it).
@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ml.embedder import DIM, INDEX_VIEWS, index_views, normalize
+from ml.embedder import INDEX_VIEWS, Projector, index_views, normalize
 
 CAP_PER_SPOT = 250
 # 360-camera views (datasets named *360*) get their own budget on top of the phone frames. Sharing the cap let
@@ -115,28 +115,36 @@ def keep_frames(data_dir, exclude_videos=()):
     return by_spot
 
 
-def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None):
+def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None, pca=None):
     """Build and return ``(VectorIndex-like arrays)`` and write ``index.npz``.
 
     Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed
     (each frame is ``len(INDEX_VIEWS)`` rows).
-    ``embed_fn`` is injectable (fake in tests); defaults to DINOv2.
+    ``embed_fn`` is injectable (fake in tests); defaults to the embedder named by
+    ``HOUND_EMBEDDER`` (:func:`ml.embedder.make_embedder`). ``pca=K`` fits a PCA
+    on the full-width rows, stores the K-d rows and saves the projection inside
+    the same ``index.npz`` (the backend applies it to every query).
     """
     data_dir = Path(data_dir)
     graph = json.loads((data_dir / 'graph.json').read_text())
     valid_nodes = {n['id'] for n in graph.get('nodes', []) if n.get('floor') in VALID_FLOORS}
 
     if embed_fn is None:
-        from ml.embedder import Dinov2Embedder  # lazy heavy import
-        embed_fn = Dinov2Embedder()
+        from ml.embedder import make_embedder  # lazy heavy import
+        embed_fn = make_embedder()
 
     headings = frame_headings(data_dir)
     vecs_parts, labels, row_headings, counts = [], [], [], {}
+    dim = getattr(embed_fn, 'dim', None)
     for spot, frames in index_frames(data_dir, valid_nodes, cap, exclude_videos):
         images = [Image.open(f).convert('RGB') for f in frames]
         try:
             views = [view for image in images for view in index_views(image)]
-            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(-1, DIM)
+            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(len(views), -1)
+            if dim is None:
+                dim = vectors.shape[1]
+            elif vectors.shape[1] != dim:
+                raise ValueError(f'Embedder returned {vectors.shape[1]}-d rows, expected {dim}-d')
         finally:
             for image in images:
                 image.close()
@@ -145,15 +153,22 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
         row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
         counts[spot] = len(frames)
 
+    projector = None
+    if vecs_parts and pca:
+        full = np.vstack(vecs_parts)
+        projector = Projector.fit(full, int(pca))
+        vecs_parts = [projector(full)]
+        print(f'PCA {projector.in_dim} -> {projector.out_dim} stored in the index')
     vecs = np.vstack(vecs_parts).astype(np.float16) if vecs_parts \
-        else np.zeros((0, DIM), dtype=np.float16)
+        else np.zeros((0, dim or 0), dtype=np.float16)
     source = np.asarray(['video'] * len(labels), dtype='U') if labels \
         else np.zeros((0,), dtype='U1')
     labels_arr = np.asarray(labels, dtype='U') if labels else np.zeros((0,), dtype='U1')
     heading_arr = np.asarray(row_headings, dtype='U') if labels else np.zeros((0,), dtype='U1')
 
     out_path = Path(out_path) if out_path else data_dir / 'index.npz'
-    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr)
+    extra = projector.npz_fields() if projector is not None else {}
+    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr, **extra)
 
     _report(counts)
     return out_path, counts
@@ -230,4 +245,9 @@ if __name__ == '__main__':  # pragma: no cover - CLI, human-blocked on real data
     import sys
 
     data = Path(os.getenv('HOUND_DATA_DIR', 'data'))
-    add_headings(data) if '--add-headings' in sys.argv else build_index(data)
+    if '--add-headings' in sys.argv:
+        add_headings(data)
+    else:
+        # python -m ml.build_index [--pca K]   (embedder from HOUND_EMBEDDER)
+        pca = int(sys.argv[sys.argv.index('--pca') + 1]) if '--pca' in sys.argv else None
+        build_index(data, pca=pca)

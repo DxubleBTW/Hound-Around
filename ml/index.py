@@ -2,8 +2,11 @@
 
 Contract (docs/contract.md, steering ml.md):
 
-``index.npz``: ``vecs`` float16 ``[N,384]`` (L2-normalized), ``labels`` str
-``[N]``, ``source`` str ``[N]`` in ``{"video", "correction"}``.
+``index.npz``: ``vecs`` float16 ``[N,D]`` (L2-normalized; D = 384 for DINOv2-small,
+8,448 for MegaLoc, or the PCA width), ``labels`` str ``[N]``, ``source`` str ``[N]``
+in ``{"video", "correction"}``, optional ``heading`` str ``[N]`` and, when the
+builder fitted a PCA, ``pca_mean`` ``[D0]`` + ``pca_components`` ``[D, D0]``
+(:class:`ml.embedder.Projector`). ``dim`` is read from the data, never assumed.
 
 Correction votes are **weighted higher** so a single corrected exemplar flips
 the very next near-identical query (design.md §3). See
@@ -15,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ml.embedder import DIM, INDEX_VIEWS, normalize
+from ml.embedder import DIM, INDEX_VIEWS, Projector, normalize
 
 # A correction vote counts as this many video votes (design.md §3): 3 frames'
 # worth, and every video frame is len(INDEX_VIEWS) rows. Scaling it keeps one
@@ -31,10 +34,18 @@ class VectorIndex:
     they are persisted as float16 to match the contract.
     """
 
-    def __init__(self, vecs=None, labels=None, source=None, heading=None):
+    def __init__(self, vecs=None, labels=None, source=None, heading=None, pca=None, dim=None):
         if vecs is None:
-            vecs = np.zeros((0, DIM), dtype=np.float32)
-        self.vecs = np.asarray(vecs, dtype=np.float32).reshape(-1, DIM)
+            vecs = np.zeros((0, dim or (pca.out_dim if pca else DIM)), dtype=np.float32)
+        vecs = np.asarray(vecs, dtype=np.float32)
+        if vecs.ndim != 2:
+            raise ValueError('Index vecs must be a 2-d [N, D] array')
+        self.vecs = vecs
+        self.dim = int(vecs.shape[1])
+        # The PCA that produced these rows (queries must go through the same one), or None.
+        self.pca = pca
+        if pca is not None and pca.out_dim != self.dim:
+            raise ValueError(f'Index is {self.dim}-d but its PCA projects to {pca.out_dim}-d')
         self.labels = list(labels or [])
         self.source = list(source or [])
         # Node each row's frame faces ('' when unknown). Matched rows face the
@@ -55,6 +66,7 @@ class VectorIndex:
             labels=[str(x) for x in data['labels']],
             source=[str(x) for x in data['source']],
             heading=[str(x) for x in data['heading']] if 'heading' in data.files else None,
+            pca=Projector.from_npz(data),
         )
 
     def save(self, path) -> None:
@@ -67,22 +79,23 @@ class VectorIndex:
             else np.zeros((0,), dtype='U1'),
             heading=np.asarray(self.heading, dtype=object).astype('U') if self.heading
             else np.zeros((0,), dtype='U1'),
+            **(self.pca.npz_fields() if self.pca is not None else {}),
         )
 
     # -- correction / snapshot -------------------------------------------
     def with_appended(self, vector, label, source) -> 'VectorIndex':
         """Return a NEW index with one row appended; does not mutate self."""
         vector = normalize(np.asarray(vector, dtype=np.float32).reshape(-1))
-        if vector.shape != (DIM,):
-            raise ValueError(f'Correction vector must be {DIM}-d')
+        if vector.shape != (self.dim,):
+            raise ValueError(f'Correction vector must be {self.dim}-d')
         vecs = np.vstack([self.vecs, vector[None, :]]).astype(np.float32)
         return VectorIndex(vecs=vecs, labels=self.labels + [label],
-                           source=self.source + [source], heading=self.heading + [''])
+                           source=self.source + [source], heading=self.heading + [''], pca=self.pca)
 
     def copy(self) -> 'VectorIndex':
         """Deep copy; snapshots must not alias arrays that later mutate."""
         return VectorIndex(vecs=self.vecs.copy(), labels=list(self.labels),
-                           source=list(self.source), heading=list(self.heading))
+                           source=list(self.source), heading=list(self.heading), pca=self.pca)
 
     # -- retrieval / voting ----------------------------------------------
     def vote(self, query, k=10, mask=None, return_rows=False):

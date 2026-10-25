@@ -27,8 +27,10 @@ def index_context(data_dir, model, router):
 
 
 class CorrectionStore:
-    def __init__(self, db, context):
-        self.db, self.context = db, context
+    def __init__(self, db, context, dim=384):
+        # ``dim`` is the live index's descriptor width (``model.dim``); a stored
+        # vector of another width belongs to another model and is refused.
+        self.db, self.context, self.dim = db, context, int(dim)
         db.execute('CREATE TABLE IF NOT EXISTS correction_vectors ('
                    'photo_id TEXT PRIMARY KEY REFERENCES corrections(photo_id) ON DELETE CASCADE, '
                    'context TEXT NOT NULL, vector BLOB NOT NULL)')
@@ -49,7 +51,7 @@ class CorrectionStore:
             'WHERE v.context = ? ORDER BY c.rowid', (self.context,)).fetchall()
         records = []
         for photo_id, label, blob in rows:
-            if len(blob) != 384 * 4:
+            if len(blob) != self.dim * 4:
                 raise ValueError('Stored correction vector has invalid dimensions')
             vector = np.frombuffer(blob, dtype='<f4').copy()
             norm = np.linalg.norm(vector.astype(np.float64))

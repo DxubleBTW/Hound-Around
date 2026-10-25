@@ -20,6 +20,7 @@ def load_backend(factory_path, data_dir):
 class StubBackend:
     """Explicit integration stub, never an accuracy claim or production default."""
     model_name = 'stub-not-recognition'
+    dim = 384
 
     def __init__(self, node):
         self.node = node
