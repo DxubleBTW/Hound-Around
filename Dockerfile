@@ -20,6 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOUND_CORS_ORIGINS=https://www.hound-around.tech,https://hound-around.tech,https://hound-around-theta.vercel.app,http://localhost:5173
 WORKDIR /app
 COPY requirements.txt requirements-core.txt ./
+COPY Dockerfile ./Dockerfile
 # Install CPU-only torch AND torchvision first so no CUDA wheels are pulled, then the
 # rest of the runtime deps from requirements.txt (both already satisfied). torchvision
 # must come from the CPU index too: easyocr needs it, and a PyPI torchvision whose torch

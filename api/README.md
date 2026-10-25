@@ -43,7 +43,7 @@ Its returned object provides:
 
 - `model_name: str` and `size: int` properties.
 - `locate(image) -> dict`: the contract's spot, floor, heading, confidence,
-  top3, ocr_room and ocr_floor plus an **internal** `vector` (384 finite,
+  top3, ocr_room and ocr_floor plus an **internal** `vector` (`model.dim` finite,
   nonzero floats). The API strips vector and diagnostics from the response.
   ML owns embedding, voting, OCR conflict resolution, confidence, and heading.
 - `prepare_correction(vector, label)`: allocate a replacement index, tagging
@@ -116,20 +116,25 @@ curl -H 'Content-Type: application/json' -d '{"photo_id":"COPY_FROM_LOCATE","tru
 
 These route identifiers must exist in the real private graph. Before judging,
 check west entrance → 164 and B1 → 262 in accessible mode against the real
-walk sheets. Rehearse photo → route → correction → new photo on the deployed
-backend and on cellular. Warm `/health` five minutes before presenting.
+walk sheets. Rehearse corrections against an isolated/staging index. Use read-only
+health/routing and appropriately prepared locate photos on production; never call
+`/correct` on live merely to test the UI.
 
 ## Container and Space handoff
 
-The root Dockerfile builds the backend scaffold on Python 3.11, port 7860,
-as a non-root user. No data, model, or images enter its build context.
-Configure a **private** Space or mount private graph/room/index files through
-your approved private storage mechanism. Do not upload them to a public Space
-repository. Mount data writable for SQLite and set HOUND_DATA_DIR accordingly.
-A public app API does not require making its private source data public.
+The Dockerfile builds the real backend on Python 3.11, port 7860, as a non-root
+user. It downloads the configured descriptor and OCR weights at build time.
+Select MegaLoc with `--build-arg EMBEDDER=megaloc`; the index descriptor identity,
+projection and width must match. Private runtime data is fetched from a private
+HF dataset, never embedded in the public code repository or image build context.
 
-The ML module, its dependencies, and its build-time model download must be
-added to the image once ML supplies its handoff. This scaffold intentionally
-starts with 503 readiness until it has those inputs. Cold start, actual model
-latency, Space hosting and Wi-Fi/cellular/hotspot/Slow 3G remain unverified.
-No deployment or publication has been performed.
+See [recognition reliability and rollout](../docs/recognition-reliability.md) for
+fingerprinted confidence, atomic pinned-package activation, strict manifest mode,
+correction receipts, persistent state and anonymous timing aggregates. Missing
+confidence calibration uses the picker; incompatible calibration/package data
+makes recognition unavailable. One active recognition request is admitted before
+upload buffering; excess requests receive 503 with `Retry-After: 1`.
+
+Coordinate backend deployment with the data lead. Record and roll back code and
+the private dataset together. This PR has not deployed a backend or calibrated
+private photos; real CPU, load, phone and held-out accuracy checks remain required.

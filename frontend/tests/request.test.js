@@ -70,8 +70,18 @@ test('a late response after cancellation cannot return a result', async (t) => {
   await assert.rejects(request, { name: 'AbortError' })
 })
 
+test('a conflicting correction gives retake guidance without claiming a retry will learn twice', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response('private error', { status: 409 }))
+  await assert.rejects(requestJson('/test', { operation: 'correct' }), (error) => {
+    assert.equal(error.status, 409)
+    assert.equal(error.retryable, false)
+    assert.match(error.message, /another spot.*new photo/)
+    return true
+  })
+})
+
 for (const [status, message, retryable] of [
-  [410, /expired or was already corrected/, false],
+  [410, /unavailable or expired/, false],
   [413, /too large/, false],
   [415, /not supported/, false],
   [429, /Wait a minute/, true],

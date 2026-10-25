@@ -185,7 +185,7 @@ def test_correction_logging_replay_and_rollback(backend):
     payload = {'photo_id': photo_id, 'true_spot': 'test_entry'}
     assert client.post('/correct', json=payload).json() == {'ok': True, 'index_size': 1}
     assert model.labels == ['test_entry']
-    assert client.post('/correct', json=payload).status_code == 410
+    assert client.post('/correct', json=payload).json() == {'ok': True, 'index_size': 1}
     with sqlite3.connect(directory / 'corrections.sqlite') as db:
         assert db.execute('SELECT photo_id,true_spot,predicted FROM corrections').fetchone() == (
             photo_id, 'test_entry', 'test_hall')

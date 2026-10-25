@@ -97,23 +97,23 @@ Set `VITE_API_URL` to the backend URL (for example the HF Space URL) for a real 
 
 ### Docker / Hugging Face Space
 
-The root `Dockerfile` builds the backend on `python:3.11-slim`, port 7860, as the non-root user `app`, with `HOUND_DATA_DIR=/app/data`. `.dockerignore` lets only `requirements.txt`, `api/`, and `ml/` enter the build context; no data, images, or weights are ever in the context.
+The Dockerfile serves the real API on Python 3.11, port 7860, as the non-root
+user `app`. It installs CPU model dependencies and downloads the selected embedder
+and OCR weights at build time. Use `--build-arg EMBEDDER=megaloc` for the pinned
+MegaLoc descriptor; repository defaults also support DINOv2. The private index
+must match the configured model and projection.
 
-Deployment is a **public** HF Space (the code is already public) that at startup downloads `graph.json`, `rooms.json`, and `index.npz` from a **private** HF dataset repo using an `HF_TOKEN` Space secret (`huggingface_hub`). Private files never enter the public Space repo. The ML model weights (`facebook/dinov2-small` + EasyOCR) are downloaded at **build time** so cold start does not pull them.
+At startup, `HOUND_DATA_REPO` and the `HF_TOKEN` secret fetch a pinned private
+runtime snapshot. No photos, graph, rooms, index or private calibration enter the
+public Space code or image build context. Configure explicit production CORS
+origins and keep one Uvicorn worker. Trusted proxy settings determine the peer
+used by the POST rate limiter; test those settings against the deployed Space.
 
-The following Dockerfile and Space changes are gated on approval of the ML dependencies and network access, and are documented but **not applied** here (see design §6):
-
-- Install CPU-only `torch`, `transformers`, `easyocr`, and `huggingface_hub`.
-- Download `facebook/dinov2-small` and the EasyOCR model weights at build time (no download at cold start).
-- `COPY` the `ml/` package into the image.
-- Set these environment variables on the Space:
-  - `HOUND_ML_FACTORY=ml.backend:create_backend`
-  - `HOUND_DATA_DIR=/app/data` (already set in the Dockerfile)
-  - `HOUND_CORS_ORIGINS=https://www.hound-around.tech,https://hound-around.tech,https://hound-around-theta.vercel.app,http://localhost:5173`
-  - `HF_TOKEN` (secret) plus the private dataset repo id
-- Run a single Uvicorn worker (corrections live in one in-memory index).
-
-**Rate limit behind the HF proxy.** The backend caps POSTs at 30/min per peer IP. Behind the HF proxy every request arrives from the proxy IP, so all judges would share one bucket. The fix (design §7) is to run Uvicorn with `--proxy-headers` and a trusted-hosts allowlist so the real client IP is resolved for the HF proxy only (never trusting arbitrary forwarded headers), and to raise the limit for the demo window as a safety net. This must be tested against the deployed Space.
+[Recognition reliability and rollout](docs/recognition-reliability.md) covers
+versioned confidence, atomic package activation, strict manifests, bounded
+inference, correction retries and privacy-preserving measurements. Missing
+confidence calibration uses the picker; incompatible artifacts report not ready.
+Coordinate backend deployment with the data lead and roll code/data back together.
 
 **Corrections need persistent storage.** The API can now replay compatible correction
 vectors and versions from SQLite after restart. Set `HOUND_STATE_DIR` to a private

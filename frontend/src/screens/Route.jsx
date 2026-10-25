@@ -104,7 +104,7 @@ const place = (s = '') => (/^Room\b/.test(s) ? s : lowerFirst(s))
 
 const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px]'
 
-export default function Route({ from, heading, dest, accessible, onRestart, api, resolvePlace = resolveDestination, roomLabels = {}, floors = [] }) {
+export default function Route({ from, heading, dest, accessible, onRestart, onReady, api, resolvePlace = resolveDestination, roomLabels = {}, floors = [] }) {
   const [response, setResponse] = useState(null)
   const [error, setError] = useState('')
   const [i, setI] = useState(0)
@@ -145,7 +145,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
         if (e?.status === 422 && heading) return run({ from, to, accessible })
         throw e
       })
-      .then((r) => { if (live) setResponse({ key: requestKey, data: r }) })
+      .then((r) => { if (live) { setResponse({ key: requestKey, data: r }); onReady?.() } })
       .catch((e) => {
         if (!live || e?.name === 'AbortError') return
         if (e?.status === 404 && accessible) {

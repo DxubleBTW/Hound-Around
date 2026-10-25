@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from threading import RLock
+from threading import BoundedSemaphore, Lock, RLock
 import time
 import uuid
 import warnings
@@ -29,6 +29,8 @@ from api.corrections import CorrectionStore, index_context
 from api.recognition import StubBackend, load_backend
 from api.routing import Router
 from ml.errors import UnrecognizedLocation
+from ml.artifacts import runtime_directory, validate_manifest
+from ml.metrics import Metrics
 
 MAX_UPLOAD = 2 * 1024 * 1024
 MAX_BODY = MAX_UPLOAD + 64 * 1024  # Multipart headers/boundary allowance.
@@ -71,6 +73,57 @@ class UploadLimit:
         await self.app(scope, replay, send)
 
 
+class RecognitionLease:
+    """Keep admission until the worker exits, even if its HTTP task is cancelled."""
+    def __init__(self, gate):
+        self.gate = gate
+        self.lock = Lock()
+        self.active = True
+        self.running = False
+
+    def _release(self):
+        if self.active:
+            self.active = False
+            self.gate.release()
+
+    def run(self, function, *args):
+        with self.lock:
+            if not self.active:
+                raise RuntimeError('Recognition request ended before inference started')
+            self.running = True
+        try:
+            return function(*args)
+        finally:
+            with self.lock:
+                self.running = False
+                self._release()
+
+    def request_finished(self):
+        with self.lock:
+            if not self.running:
+                self._release()
+
+
+class RecognitionAdmission:
+    """Reject excess recognition work before buffering any upload body."""
+    def __init__(self, app, gate):
+        self.app, self.gate = app, gate
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope['method'] != 'POST' or scope['path'] != '/locate':
+            return await self.app(scope, receive, send)
+        if not self.gate.acquire(blocking=False):
+            scope.setdefault('state', {})['recognition_busy'] = True
+            return await JSONResponse({'detail': 'Recognition is busy; retry shortly'}, status_code=503,
+                                      headers={'Retry-After': '1'})(scope, receive, send)
+        lease = RecognitionLease(self.gate)
+        scope.setdefault('state', {})['recognition_lease'] = lease
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            lease.request_finished()
+
+
 class Correction(BaseModel):
     model_config = ConfigDict(extra='forbid')
     photo_id: str
@@ -98,16 +151,20 @@ class MatchResult(BaseModel):
 
 def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                cache_limit=512, ttl_seconds=600, allowed_origins=None, state_dir=None):
-    data_dir = Path(data_dir or os.getenv('HOUND_DATA_DIR', 'data'))
-    state_dir = Path(state_dir or os.getenv('HOUND_STATE_DIR') or data_dir)
+    data_root = Path(data_dir or os.getenv('HOUND_DATA_DIR', 'data'))
+    data_dir = runtime_directory(data_root)
+    state_dir = Path(state_dir or os.getenv('HOUND_STATE_DIR') or data_root)
     if cache_limit < 1 or ttl_seconds <= 0:
         raise ValueError('Cache size and TTL must be positive')
     lock = RLock()
+    model_lock = RLock()
+    admission = BoundedSemaphore(1)
+    metrics = Metrics()
     rate_lock = RLock()
     cache = OrderedDict()
     requests = OrderedDict()
     state = {'matcher': matcher, 'router': router, 'db': None, 'version': 0, 'rollback': None,
-             'store': None, 'base_snapshot': None}
+             'store': None, 'base_snapshot': None, 'size': 0}
 
     def prune():
         now = clock()
@@ -117,7 +174,16 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
 
     @asynccontextmanager
     async def lifespan(app):
-        if state['router'] is None and (data_dir / 'graph.json').exists():
+        package_valid = True
+        try:
+            manifest = validate_manifest(data_dir)
+            if manifest is None:
+                logger.warning('Runtime manifest absent; package compatibility is not verified')
+        except (OSError, ValueError) as error:
+            logger.error('Runtime package unavailable: %s', error)
+            state['matcher'] = state['router'] = None
+            package_valid = False
+        if package_valid and state['router'] is None and (data_dir / 'graph.json').exists():
             graph = json.loads((data_dir / 'graph.json').read_text())
             rooms = json.loads((data_dir / 'rooms.json').read_text())
             state['router'] = Router(graph, rooms)
@@ -164,6 +230,9 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                     model.restore(state['base_snapshot'])
                     raise
                 state['version'] = store.version
+                state['size'] = model.size
+                if hasattr(model, 'metrics'):
+                    model.metrics = metrics
             yield
         finally:
             cache.clear()
@@ -174,6 +243,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(UploadLimit)
+    app.add_middleware(RecognitionAdmission, gate=admission)
     origins = allowed_origins if allowed_origins is not None else [
         x.strip() for x in os.getenv('HOUND_CORS_ORIGINS', 'http://localhost:5173').split(',') if x.strip()]
     if '*' in origins:
@@ -200,6 +270,26 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                 requests[peer] = (started, count + 1)
         return await call_next(request)
 
+    @app.middleware('http')
+    async def aggregate_requests(request: Request, call_next):
+        operation = {'/locate': 'locate', '/route': 'route', '/correct': 'correct'}.get(request.url.path)
+        if operation is None:
+            return await call_next(request)
+        started = time.perf_counter()
+        outcome = 'failed'
+        try:
+            response = await call_next(request)
+            if response.status_code < 400:
+                outcome = 'ok'
+            elif operation == 'locate' and response.status_code == 503:
+                outcome = 'busy' if getattr(request.state, 'recognition_busy', False) else 'unavailable'
+            elif operation == 'locate' and response.status_code == 422:
+                outcome = 'rejected' if getattr(request.state, 'recognition_rejected', False) else 'invalid'
+            return response
+        finally:
+            metrics.observe(operation, time.perf_counter() - started)
+            metrics.increment(f'{operation}.{outcome}')
+
     @app.exception_handler(Exception)
     async def unexpected(request, exc):
         logger.error('Backend request failed: %s', type(exc).__name__)
@@ -211,7 +301,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             prune()
             model = state['matcher']
             ready = model is not None and state['router'] is not None
-            return JSONResponse({'ok': ready, 'index_size': model.size if model else 0,
+            return JSONResponse({'ok': ready, 'index_size': state['size'] if model else 0,
                                  'model': model.model_name if model else 'unconfigured'},
                                 status_code=200 if ready else 503)
 
@@ -233,15 +323,19 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             raise HTTPException(422, 'Invalid or unsupported image') from None
         try:
             image.thumbnail((512, 512))
-            with lock:
+            metrics.observe('decode', time.perf_counter() - started)
+            waiting = time.perf_counter()
+            with model_lock:
+                metrics.observe('model_wait', time.perf_counter() - waiting)
                 model = state['matcher']
                 if model is None or state['router'] is None:
                     raise HTTPException(503, 'Recognition data not ready')
-                prune()
                 # Second photo of the same spot: fuse with the first photo's
                 # vector (kept for corrections). An expired id falls back to a
                 # single-photo answer rather than an error.
-                previous = cache.get(previous_id) if previous_id else None
+                with lock:
+                    prune()
+                    previous = cache.get(previous_id) if previous_id else None
                 try:
                     result = dict(model.locate(image, previous=previous['vector'].copy())
                                   if previous else model.locate(image))
@@ -268,14 +362,15 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                         or (result['heading'] is not None and not state['router'].graph.has_edge(
                             result['spot'], result['heading']))):
                     raise ValueError('ML result disagrees with graph')
-                prune()
-                while len(cache) >= cache_limit:
-                    cache.popitem(last=False)
-                photo_id = 'p_' + uuid.uuid4().hex
-                cache[photo_id] = {'vector': vector.copy(), 'predicted': result['spot'],
-                                   'confidence': result['confidence'], 'expires': clock() + ttl_seconds}
-                return {**result, 'photo_id': photo_id,
-                        'ms': round((time.perf_counter() - started) * 1000)}
+                with lock:
+                    prune()
+                    while len(cache) >= cache_limit:
+                        cache.popitem(last=False)
+                    photo_id = 'p_' + uuid.uuid4().hex
+                    cache[photo_id] = {'vector': vector.copy(), 'predicted': result['spot'],
+                                       'confidence': result['confidence'], 'expires': clock() + ttl_seconds}
+                    return {**result, 'photo_id': photo_id,
+                            'ms': round((time.perf_counter() - started) * 1000)}
         finally:
             image.close()
 
@@ -284,27 +379,32 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                                            'properties': {'image': {'type': 'string', 'format': 'binary'},
                                                           'previous': {'type': 'string'}}}}}}})
     async def locate_endpoint(request: Request):
-        if not request.headers.get('content-type', '').lower().startswith('multipart/form-data'):
-            raise HTTPException(415, 'Multipart image required')
         try:
-            form = await MemoryMultipartParser(request.headers, request.stream(), max_files=1,
-                                               max_fields=1, max_part_size=MAX_BODY).parse()
-        except (MultiPartException, MultipartParseError):
-            raise HTTPException(422, 'Invalid multipart upload') from None
-        try:
-            upload = form.get('image')
-            if upload is None or not hasattr(upload, 'read'):
-                raise HTTPException(422, 'Multipart image field required')
-            raw = await upload.read(MAX_UPLOAD + 1)
-            if len(raw) > MAX_UPLOAD:
-                raise HTTPException(413, 'Image exceeds 2 MB')
-            previous = form.get('previous')
-            if previous is not None and (not isinstance(previous, str)
-                                         or not re.fullmatch(r'p_[0-9a-f]{32}', previous)):
-                raise HTTPException(422, 'Invalid previous photo id')
-            return await run_in_threadpool(locate, raw, previous)
-        finally:
-            await form.close()
+            if not request.headers.get('content-type', '').lower().startswith('multipart/form-data'):
+                raise HTTPException(415, 'Multipart image required')
+            try:
+                form = await MemoryMultipartParser(request.headers, request.stream(), max_files=1,
+                                                   max_fields=1, max_part_size=MAX_BODY).parse()
+            except (MultiPartException, MultipartParseError):
+                raise HTTPException(422, 'Invalid multipart upload') from None
+            try:
+                upload = form.get('image')
+                if upload is None or not hasattr(upload, 'read'):
+                    raise HTTPException(422, 'Multipart image field required')
+                raw = await upload.read(MAX_UPLOAD + 1)
+                if len(raw) > MAX_UPLOAD:
+                    raise HTTPException(413, 'Image exceeds 2 MB')
+                previous = form.get('previous')
+                if previous is not None and (not isinstance(previous, str)
+                                             or not re.fullmatch(r'p_[0-9a-f]{32}', previous)):
+                    raise HTTPException(422, 'Invalid previous photo id')
+                return await run_in_threadpool(request.state.recognition_lease.run, locate, raw, previous)
+            finally:
+                await form.close()
+        except HTTPException as error:
+            if isinstance(error.detail, dict) and error.detail.get('code') == 'unrecognized_location':
+                request.state.recognition_rejected = True
+            raise
 
     @app.get('/route')
     def route_endpoint(start: str = Query(alias='from'), to: str = Query(),
@@ -321,16 +421,26 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
 
     @app.post('/correct')
     def correct(body: Correction):
-        with lock:
-            prune()
-            model, routes, db = state['matcher'], state['router'], state['db']
-            if model is None or routes is None or db is None:
-                raise HTTPException(503, 'Recognition data not ready')
-            if body.true_spot not in routes.nodes:
-                raise HTTPException(422, 'Unknown node')
-            entry = cache.get(body.photo_id)
-            if entry is None:
-                raise HTTPException(410, 'Photo expired, corrected, or unknown; take another photo')
+        with model_lock:
+            with lock:
+                prune()
+                model, routes, db = state['matcher'], state['router'], state['db']
+                if model is None or routes is None or db is None:
+                    raise HTTPException(503, 'Recognition data not ready')
+                if body.true_spot not in routes.nodes:
+                    raise HTTPException(422, 'Unknown node')
+                receipt = state['store'].receipt(body.photo_id)
+                if receipt is not None:
+                    label, size = receipt
+                    if label != body.true_spot:
+                        raise HTTPException(409, 'Photo already corrected to another location')
+                    return {'ok': True, 'index_size': size if size is not None else model.size}
+                entry = cache.get(body.photo_id)
+                if entry is None:
+                    raise HTTPException(410, 'Photo expired or unknown; take another photo')
+            # Wide descriptor copies and storage I/O must not block readiness.
+            # The model lock serializes every index/DB mutation; health reads
+            # only the committed cached size under the separate state lock.
             prepared = model.prepare_correction(entry['vector'], body.true_spot)
             snapshot = model.snapshot()
             try:
@@ -338,23 +448,26 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                     db.execute('INSERT INTO corrections VALUES (?, ?, ?, ?, ?)',
                                (body.photo_id, body.true_spot, entry['predicted'], entry['confidence'],
                                 datetime.now(timezone.utc).isoformat()))
-                    state['store'].add(body.photo_id, entry['vector'])
                     model.apply_correction(prepared)
+                    state['store'].add(body.photo_id, entry['vector'], model.size)
             except Exception:
                 model.restore(snapshot)
                 raise
-            state['rollback'] = (body.photo_id, snapshot)
-            state['version'] = state['store'].version
-            del cache[body.photo_id]
-            return {'ok': True, 'index_size': model.size}
+            with lock:
+                state['rollback'] = (body.photo_id, snapshot)
+                state['version'] = state['store'].version
+                cache.pop(body.photo_id, None)
+                state['size'] = model.size
+                return {'ok': True, 'index_size': model.size}
 
     def rollback_last_correction():
         """Local operator hook, deliberately not a new public API endpoint."""
-        with lock:
-            if state['rollback'] is None:
-                raise ValueError('No correction to roll back')
-            photo_id, snapshot = state['rollback']
-            model, db = state['matcher'], state['db']
+        with model_lock:
+            with lock:
+                if state['rollback'] is None:
+                    raise ValueError('No correction to roll back')
+                photo_id, snapshot = state['rollback']
+                model, db = state['matcher'], state['db']
             current = model.snapshot()
             try:
                 with db:
@@ -363,12 +476,15 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
             except Exception:
                 model.restore(current)
                 raise
-            # Invalidate vectors computed against the replaced index version.
-            cache.clear()
-            state['rollback'] = None
-            state['version'] = state['store'].version
-            return state['version']
+            with lock:
+                # Invalidate vectors computed against the replaced index version.
+                cache.clear()
+                state['rollback'] = None
+                state['version'] = state['store'].version
+                state['size'] = model.size
+                return state['version']
 
+    app.state.metrics_snapshot = metrics.snapshot
     app.state.rollback_last_correction = rollback_last_correction
     app.state.index_version = lambda: state['version']
     return app

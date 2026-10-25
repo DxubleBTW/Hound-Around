@@ -18,6 +18,7 @@ import numpy as np
 
 from ml import calibration
 from ml.embedder import DIM, MODEL_NAME, as_embed_fn, projected_model_name, with_projection
+from ml.metrics import Metrics
 from ml.index import VectorIndex
 from ml.errors import UnrecognizedLocation
 from ml.rejection import load_threshold, threshold_value
@@ -55,8 +56,11 @@ class Backend:
 
     def __init__(self, index: VectorIndex, graph: dict, headings: dict,
                  embed_fn, ocr_reader=None, model_name: str = MODEL_NAME,
-                 top_k: int = TOP_K, min_similarity=None, rooms=None):
+                 top_k: int = TOP_K, min_similarity=None, rooms=None, confidence_model=None, feature_observer=None):
         self.index = index
+        self.confidence_model = confidence_model
+        self.feature_observer = feature_observer
+        self.metrics = Metrics()
         self._embed = embed_fn
         self._ocr = ocr_reader
         self._model_name = model_name
@@ -116,12 +120,12 @@ class Backend:
         """``previous``: the vector of an earlier photo from the same spot (the
         "turn around and snap again" flow). Both photos' votes are added."""
         # Embed, then drop the image reference immediately (never retained).
-        vector = np.asarray(self._embed(image), dtype=np.float32).reshape(-1)
+        with self.metrics.time('embedding'):
+            vector = np.asarray(self._embed(image), dtype=np.float32).reshape(-1)
         if len(self.index) == 0:
             # Never invent a location (review N07); the API turns this into an error.
             raise RuntimeError('Recognition index is empty')
-        ranked, neighbors, rows = self.index.vote(vector, k=self.top_k, return_rows=True)
-        first_vote = (ranked, neighbors)
+        ranked, neighbors, rows = self._vote(vector)
         # Vote agreement is not evidence that a photo belongs to this building:
         # even an unrelated image has ten nearest neighbors. Gate by similarity
         # before OCR or location voting can turn it into a confident answer.
@@ -136,31 +140,35 @@ class Backend:
         # OCR gate: only when uncertain or the top3 span multiple floors.
         floors_in_top3 = {self._floor.get(r['spot']) for r in ranked[:3]}
         ocr_room, ocr_floor = None, None
+        mask = None
         if self._ocr is not None and (confidence < OCR_CONFIDENCE_GATE or len(floors_in_top3) > 1):
-            ocr_room, ocr_floor = self._ocr(image)
+            with self.metrics.time('ocr'):
+                ocr_room, ocr_floor = self._ocr(image)
             # Trust the OCR room too: if it maps to a real room on a known
             # floor (rooms.json), that floor is at least as authoritative as a
             # "Floor N" numeral and covers signs that only show a room number.
             target_floor = self._room_floor.get(ocr_room) if ocr_room else None
             if target_floor is None:
                 target_floor = ocr_floor
-            if target_floor is not None and target_floor != floor:
+            if target_floor is not None:
                 # The sign's floor wins: re-vote over that floor's rows only, so
                 # the returned spot is top3[0] and the picker can offer it
                 # (review N03).
                 mask = np.array([self._floor.get(l) == target_floor for l in self.index.labels])
                 if mask.any():
-                    ranked, _ = self.index.vote(vector, k=self.top_k, mask=mask)
+                    ranked, neighbors, rows = self._vote(vector, mask)
                     spot, floor = ranked[0]['spot'], target_floor
                     confidence = self._confidence(ranked)
+                else:
+                    mask = None
 
         if previous is not None:
             # Two photos facing different ways split look-alike hallways. Add the
-            # votes (unmasked, as measured in ml/research/calibrate.py) and let the
+            # votes on the OCR floor, when known, and let the
             # user confirm on the fused top 3: never ask for a third photo.
             tally: dict = {}
-            second_vote = self.index.vote(np.asarray(previous, dtype=np.float32), k=self.top_k)[0]
-            for votes in (first_vote[0], second_vote):
+            previous_vote = self._vote(np.asarray(previous, dtype=np.float32), mask)[0]
+            for votes in (ranked, previous_vote):
                 for r in votes:
                     tally[r['spot']] = tally.get(r['spot'], 0) + r['votes']
             fused = sorted(tally, key=tally.get, reverse=True)
@@ -175,12 +183,20 @@ class Backend:
 
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
         span = len({self._floor.get(t['spot']) for t in top3}) > 1
-        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote), self.model_name)
+        features = self._features(spot, confidence, span, ranked, neighbors)
+        if self.feature_observer is not None:
+            self.feature_observer(dict(features))
+        p = self.confidence_model.predict(features) if self.confidence_model is not None else None
         result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows)
-        return {**result, 'p_correct': round(p, 3), 'tier': calibration.tier(p, span)}
+        return {**result, 'p_correct': round(p, 3) if p is not None else None,
+                'tier': self.confidence_model.tier(p, span) if p is not None else 'picker'}
+
+    def _vote(self, vector, mask=None):
+        with self.metrics.time('search'):
+            return self.index.vote(vector, k=self.top_k, mask=mask, return_rows=True)
 
     def _features(self, spot, confidence, span, ranked, neighbors):
-        """The calibration features, computed exactly as ml/research/calibrate.py does."""
+        """The calibration features, exported by the offline confidence calibrator."""
         best: dict = {}
         for label, _, sim in neighbors:
             best[label] = max(best.get(label, -1.0), sim)
@@ -278,7 +294,7 @@ def load_headings(labels_csv: Path) -> dict:
     return {label: counter.most_common(1)[0][0] for label, counter in counts.items()}
 
 
-def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K, index_path=None):
+def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K, index_path=None, load_configuration=True):
     """Factory called once at startup with ``data_dir`` (pathlib.Path).
 
     By default loads ``index.npz``/``graph.json``/``labels.csv`` from
@@ -335,11 +351,11 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
                          f'set HOUND_EMBEDDER to the model the index was built with, or rebuild it')
     embed_fn = with_projection(embed_fn, index.pca)
     model_name = projected_model_name(base_name, index.pca)
-    calibration.coefficients(model_name)  # refuse an uncalibrated MegaLoc variant at startup
+    min_similarity = load_threshold(data_dir, index_path, model_name) if load_configuration else None
+    confidence_model = calibration.load_model(data_dir, index_path, model_name) if load_configuration else None
     return Backend(index, graph, headings, embed_fn, ocr_reader=reader,
                    model_name=model_name, top_k=top_k,
-                   min_similarity=load_threshold(data_dir, index_path, model_name),
-                   rooms=rooms)
+                   min_similarity=min_similarity, rooms=rooms, confidence_model=confidence_model)
 
 
 def _resolve_embedder(embedder):
