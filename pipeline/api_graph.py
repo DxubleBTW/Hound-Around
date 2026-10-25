@@ -1,7 +1,8 @@
 """Make the API's graph.json and rooms.json from the walk-sheet graph plus a private patch file.
 
 - Drops floors the event can't use (the API only accepts B1, F1, F2).
-- Adds nodes found on video but missing from the walk sheets (patch "add_nodes" / "add_edges").
+- Adds nodes found on video but missing from the walk sheets (patch "add_nodes" / "add_edges"), and drops
+  walk-sheet edges the patch replaces ("remove_edges": [[from, to], ...], either direction).
 - verify edges: the API skips `verify: true`, which strands the spots behind them. Edges walked on video are marked
   confirmed. With "keep_unconfirmed", the rest stay routable and are tagged `assumed` so the walk can still check them.
 - Writes rooms.json from the patch's "rooms".
@@ -27,7 +28,10 @@ def main():
     patch = json.loads(args.patch.read_text())
     g["nodes"] = [n for n in g["nodes"] if n["floor"] in FLOORS] + patch.get("add_nodes", [])
     ids = {n["id"] for n in g["nodes"]}
-    edges = [e for e in g["edges"] if e["from"] in ids and e["to"] in ids] + patch.get("add_edges", [])
+    # "remove_edges" replaces a walk-sheet edge, e.g. when a corridor gets a new waypoint in the middle.
+    removed = {frozenset(pair) for pair in patch.get("remove_edges", [])}
+    edges = [e for e in g["edges"] if e["from"] in ids and e["to"] in ids
+             and frozenset((e["from"], e["to"])) not in removed] + patch.get("add_edges", [])
 
     confirmed = {frozenset(c[:2]): c[2] for c in patch.get("confirmed_by_video", [])}
     stats = {"confirmed": 0, "assumed": 0, "still_skipped": 0}
