@@ -646,3 +646,54 @@ def test_second_photo_adds_both_votes():
     # After two photos the user confirms on the fused top 3; never a third photo.
     assert fused['tier'] == 'picker' and fused['p_correct'] is None
     assert 0 <= fused['confidence'] <= 1
+
+
+# --- per-row heading: the photo's facing, not a per-spot guess ---------------
+
+def test_heading_is_majority_of_matched_rows():
+    red, green = (255, 0, 0), (0, 128, 0)
+    vecs = np.stack([COLOR_VEC[red]] * 6 + [COLOR_VEC[green]] * 4)
+    labels = ['F1_a'] * 6 + ['F1_b'] * 4
+    # F1_a's frames mostly face F1_b; one faces a non-neighbor (ignored).
+    heading = ['F1_b'] * 4 + ['F2_c', ''] + ['F1_a'] * 4
+    index = VectorIndex(vecs=vecs, labels=labels, source=['video'] * 10, heading=heading)
+    result = build(index).locate(solid(red))
+    assert result['spot'] == 'F1_a' and result['heading'] == 'F1_b'
+
+
+def test_heading_needs_agreement_from_rows():
+    red = (255, 0, 0)
+    # Only one matched row says which way it faces: too little to claim.
+    heading = ['F1_b'] + [''] * 9
+    index = VectorIndex(vecs=np.stack([COLOR_VEC[red]] * 10), labels=['F1_a'] * 10,
+                        source=['video'] * 10, heading=heading)
+    assert build(index).locate(solid(red))['heading'] is None
+
+
+def test_index_heading_round_trip_and_old_files(tmp_path):
+    index = make_index([((255, 0, 0), 'F1_a', 'video')] * 2)
+    index.heading = ['F1_b', '']
+    index.save(tmp_path / 'i.npz')
+    assert VectorIndex.load(tmp_path / 'i.npz').heading == ['F1_b', '']
+    # Corrections carry no heading.
+    assert index.with_appended(COLOR_VEC[(255, 0, 0)], 'F1_a', 'correction').heading == ['F1_b', '', '']
+    old = tmp_path / 'old.npz'
+    np.savez(old, vecs=index.vecs.astype(np.float16), labels=np.asarray(['F1_a'] * 2), source=np.asarray(['video'] * 2))
+    assert VectorIndex.load(old).heading == ['', '']
+
+
+def test_add_headings_matches_rows_without_reembedding(tmp_path):
+    test_build_index_contract_format(tmp_path)
+    from ml.build_index import add_headings
+    from ml.embedder import INDEX_VIEWS
+    data = dict(np.load(tmp_path / 'index.npz'))
+    data.pop('heading')
+    np.savez(tmp_path / 'index.npz', **data)
+    add_headings(tmp_path, cap=60)
+    out = np.load(tmp_path / 'index.npz')
+    assert (out['vecs'] == data['vecs']).all()
+    assert list(out['heading'][:len(INDEX_VIEWS)]) == ['F1_b'] * len(INDEX_VIEWS)
+    assert set(out['heading'][out['labels'] != 'F1_a']) == {''}
+    # A different cap reorders the rows: refuse rather than mislabel.
+    with pytest.raises(ValueError):
+        add_headings(tmp_path, cap=10)

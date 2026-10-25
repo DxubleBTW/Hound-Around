@@ -39,6 +39,8 @@ OCR_CONFIDENCE_GATE = 0.85
 # video-out, this cut picker prompts from 82% to 62% of photos while user
 # success rose 55% -> 57% (ml/research/floor_report.py).
 NEIGHBORHOOD_M = 8
+# Matched rows (3 views per frame) that must agree before claiming the photo's facing.
+MIN_HEADING_VOTES = 2
 
 
 class Backend:
@@ -113,7 +115,7 @@ class Backend:
         if len(self.index) == 0:
             # Never invent a location (review N07); the API turns this into an error.
             raise RuntimeError('Recognition index is empty')
-        ranked, neighbors = self.index.vote(vector, k=self.top_k)
+        ranked, neighbors, rows = self.index.vote(vector, k=self.top_k, return_rows=True)
         first_vote = (ranked, neighbors)
         # Vote agreement is not evidence that a photo belongs to this building:
         # even an unrelated image has ten nearest neighbors. Gate by similarity
@@ -162,13 +164,14 @@ class Backend:
             ranked = [{'spot': s, 'votes': tally[s]} for s in fused]
             confidence = self._confidence(ranked, k=2 * self.top_k)
             top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
-            result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
+            # Heading from this (latest) photo's rows: it's the way the user faces now.
+            result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows)
             return {**result, 'p_correct': None, 'tier': 'picker'}
 
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
         span = len({self._floor.get(t['spot']) for t in top3}) > 1
         p = calibration.p_correct(self._features(spot, confidence, span, *first_vote))
-        result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
+        result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows)
         return {**result, 'p_correct': round(p, 3), 'tier': calibration.tier(p, span)}
 
     def _features(self, spot, confidence, span, ranked, neighbors):
@@ -204,20 +207,33 @@ class Backend:
         votes = sum(r['votes'] for r in ranked if r['spot'] == winner or r['spot'] in near)
         return min(1.0, votes / (k or self.top_k))
 
-    def _choose_heading(self, spot):
-        """Most common labels.csv heading for the spot, if a graph neighbor."""
+    def _choose_heading(self, spot, rows=()):
+        """The way the photo faces: the majority heading of its matched rows at
+        ``spot`` (those frames look the same way), if it is a graph neighbor.
+
+        An index without per-row headings falls back to the spot's most common
+        labels.csv heading, which is a guess, not the photo's facing."""
         if spot is None:
             return None
+        options = self._neighbors.get(spot, set())
+        if any(self.index.heading):
+            votes = Counter(self.index.heading[i] for i in rows
+                            if self.index.labels[i] == spot and self.index.heading[i] in options)
+            if not votes:
+                return None
+            heading, count = votes.most_common(1)[0]
+            # Needs two agreeing rows and a majority, else no claim.
+            return heading if count >= MIN_HEADING_VOTES and count * 2 > sum(votes.values()) else None
         candidate = self._heading.get(spot)
-        if candidate is not None and candidate in self._neighbors.get(spot, set()):
+        if candidate is not None and candidate in options:
             return candidate
         return None
 
-    def _result(self, vector, spot, floor, confidence, top3, ocr_room, ocr_floor):
+    def _result(self, vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows=()):
         return {
             'spot': spot,
             'floor': floor,
-            'heading': self._choose_heading(spot) if spot else None,
+            'heading': self._choose_heading(spot, rows) if spot else None,
             'confidence': float(confidence),
             'top3': top3,
             'ocr_room': ocr_room,
