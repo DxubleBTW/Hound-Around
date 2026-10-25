@@ -31,10 +31,13 @@ The people who pay for this are first-year students hunting for a room by number
 and wheelchair users who need a route without stairs. Google built indoor AR navigation for airports and malls (Indoor
 Live View, 2021). Nobody built it for students.
 
-We asked BU students about the worst time they got lost in a campus building. One answer sums it up:
+We asked students about the worst time they got lost in a campus building. Two answers:
 
 > "I had an event in the GSU. I couldn't find the room, so I didn't go."
 > (BU student, October 2026)
+
+An MIT upperclassman told us they didn't know where a lab was and spent 20 minutes finding it. Knowing your own campus
+doesn't help in an unfamiliar building.
 
 Being lost indoors doesn't just make people late; it makes them skip things. We spend about 90% of our lives indoors,
 exactly where GPS fails.
@@ -342,7 +345,7 @@ URL for a real build; see [`frontend/README.md`](frontend/README.md).
 | David Ribeiro | ML and data: matching, evaluation, filming and labeling pipeline |
 | Jun Olea | Backend: API, routing, corrections, reliability |
 | Avery Lee | Frontend and Kiro: phone app, spec, steering and hooks |
-| Tobi | Data and workflow |
+| Tobi Olawale | Data and workflow |
 | Bryan Martinez | Pitch, design and testing |
 
 All five of us worked on the pitch and design, verification, and regression testing through GitHub pull requests and
