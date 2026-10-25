@@ -110,6 +110,37 @@ def test_accessible_route_and_alias(backend):
     assert client.get('/route', params=params).json()['total_meters'] == 15
 
 
+def test_route_legs_one_per_floor(router):
+    legs = router.route('test_entry', 'test_room', accessible=True)['legs']
+    assert [(leg['floor'], leg['start'], leg['end']) for leg in legs] == [
+        (1, 'test_entry', 'test_lift'), (2, 'test_upper', 'test_room')]
+    assert legs[0]['exit'] == {'mode': 'elevator', 'to_floor': 2}
+    assert legs[-1]['exit'] is None
+    # Normalized per leg: inside the padded box, aspect kept, no raw coordinates.
+    assert legs[0]['points'] == [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9]]
+    assert legs[1]['points'] == [[0.1, 0.5], [0.9, 0.5]]
+    stairs = router.route('test_entry', 'test_room')['legs']
+    assert stairs[0]['exit'] == {'mode': 'stairs', 'to_floor': 2}
+    assert router.route('test_entry', 'test_entry')['legs'] == [
+        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]
+
+
+def test_route_legs_ride_through_floors():
+    graph = {'nodes': [
+        {'id': 'synthetic_b1', 'floor': -1, 'x': 0, 'y': 0},
+        {'id': 'synthetic_f1', 'floor': 1, 'x': 0, 'y': 0},
+        {'id': 'synthetic_f2', 'floor': 2, 'x': 0, 'y': 0},
+        {'id': 'synthetic_room', 'floor': 2, 'x': 0, 'y': 10},
+    ], 'edges': [
+        {'from': 'synthetic_b1', 'to': 'synthetic_f1', 'meters': 0, 'vertical': True},
+        {'from': 'synthetic_f1', 'to': 'synthetic_f2', 'meters': 0, 'vertical': True},
+        {'from': 'synthetic_f2', 'to': 'synthetic_room', 'meters': 10},
+    ]}
+    legs = Router(graph, []).route('synthetic_b1', 'synthetic_room')['legs']
+    assert [leg['floor'] for leg in legs] == [-1, 2]
+    assert legs[0]['exit'] == {'mode': 'elevator', 'to_floor': 2}
+
+
 def test_cost_preferred_and_reverse_elevator(router):
     assert router.route('test_lift', 'test_upper')['total_meters'] == 25
     result = router.route('test_upper', 'test_lift', accessible=True)
@@ -125,7 +156,8 @@ def test_route_errors_and_same_spot(backend):
     assert client.get('/route', params={'from': 'test_entry', 'to': 'TEST',
                                        'heading': 'test_room'}).status_code == 422
     same = client.get('/route', params={'from': 'test_entry', 'to': 'test_entry'}).json()
-    assert same == {'steps': [], 'total_meters': 0.0, 'est_seconds': 0}
+    assert same == {'steps': [], 'total_meters': 0.0, 'est_seconds': 0, 'legs': [
+        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]}
 
 
 def test_correction_logging_replay_and_rollback(backend):

@@ -47,12 +47,19 @@ POST /locate   (multipart: image)
 
 GET /route?from=F2_hall_e2&to=164&accessible=true&heading=F2_hall_e3
 → {"steps":[{"instruction":"Turn around and walk toward the podium elevators","meters":22,"node":"F2_podium_elev"}],
-   "total_meters":48,"est_seconds":45}
+   "total_meters":48,"est_seconds":45,
+   "legs":[{"floor":2,"points":[[0.1,0.5],[0.9,0.5]],"start":"F2_hall_e2","end":"F2_podium_elev",
+            "exit":{"mode":"elevator","to_floor":1}},
+           {"floor":1,"points":[[0.1,0.1],[0.9,0.9]],"start":"F1_podium_elev","end":"F1_room164","exit":null}]}
 
 POST /correct  {"photo_id":"p_8f3a","true_spot":"F2_hall_e1"}  → {"ok":true,"index_size":2214}
 
 GET /health    → {"ok":true,"index_size":2213,"model":"dinov2-small"}
 ```
+
+`legs` draws the route: one leg per floor, split at elevators/stairs (riding through a floor is one exit).
+`points` are the path's nodes normalized to that leg's own bounding box (0–1, aspect kept, 10% padding), so no
+building coordinates, floor plan or other nodes ever reach the client. The last leg's `exit` is null.
 
 Route instructions start with one of: `Walk`, `Continue`, `Turn left and walk`, `Turn right and walk`,
 `Turn around and walk`, `Take the elevator to`, `Take the stairs to`. A turn needs at least 45° (150° for

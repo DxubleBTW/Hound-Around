@@ -147,4 +147,39 @@ class Router:
                 steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b})
             total += edge['meters']
         return {'steps': steps, 'total_meters': total,
-                'est_seconds': math.ceil(total / (0.9 if accessible else 1.2))}
+                'est_seconds': math.ceil(total / (0.9 if accessible else 1.2)),
+                'legs': self.legs(path, graph)}
+
+    def legs(self, path, graph):
+        """One drawable leg per floor. Points are normalized to each leg's own
+        bounding box, so building coordinates and other geometry never leave
+        the server: the client sees only the shape of its own path."""
+        legs, run = [], [path[0]]
+        for a, b in zip(path, path[1:]):
+            edge = graph[a][b]
+            if not edge.get('vertical', False):
+                run.append(b)
+                continue
+            exit = {'mode': 'stairs' if edge.get('stairs', False) else 'elevator',
+                    'to_floor': self.nodes[b]['floor']}
+            if len(run) == 1 and legs:
+                # The previous edge was vertical too: riding through a floor
+                # (LL -> 1 -> 2) is one move, not a one-point leg.
+                legs[-1]['exit'] = exit
+            else:
+                legs.append(self._leg(run, exit))
+            run = [b]
+        legs.append(self._leg(run, None))
+        return legs
+
+    def _leg(self, run, exit):
+        xs = [self.nodes[n]['x'] for n in run]
+        ys = [self.nodes[n]['y'] for n in run]
+        span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+        # Keep aspect: scale the longer side to 0.8, centre the shorter one.
+        ox = (1 - 0.8 * (max(xs) - min(xs)) / span) / 2
+        oy = (1 - 0.8 * (max(ys) - min(ys)) / span) / 2
+        points = [[round(ox + 0.8 * (x - min(xs)) / span, 3),
+                   round(oy + 0.8 * (y - min(ys)) / span, 3)] for x, y in zip(xs, ys)]
+        return {'floor': self.nodes[run[0]]['floor'], 'points': points,
+                'start': run[0], 'end': run[-1], 'exit': exit}

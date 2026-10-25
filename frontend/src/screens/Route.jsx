@@ -5,12 +5,16 @@ import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import { compactSteps } from '../lib/steps.js'
+import { directionsShown, exitLabel, setDirectionsShown, stepsByLeg, usableLegs } from '../lib/legs.js'
 import PawBurst from '../components/PawBurst.jsx'
+import RoutePath from '../components/RoutePath.jsx'
 import { ElevatorIcon } from '../components/Paw.jsx'
 
-// Ethics rule from the brief: NO public building map. No floor plan, no SVG layout,
-// no "you are here" dot or coordinate. We make directions feel full using WORDS only
-// — the backend's own instruction prose plus the landmark it names. We parse the
+// Ethics rule from the brief: NO public building map. No floor plan, no other
+// hallways, no building coordinates. When the backend sends `legs`, the screen
+// opens on the user's OWN path for one floor (normalized per leg server-side,
+// see components/RoutePath.jsx); everything else stays words. Without legs it
+// falls back to the sign-by-sign view below. We parse the
 // instruction to surface "heading toward …" and a one-step-ahead preview; we never
 // re-derive or rewrite the directions themselves. The only text transform we apply
 // is a DISPLAY-only reword (prettifyLandmark, see lib/directions.js) — the raw
@@ -96,6 +100,9 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   const [i, setI] = useState(0)
   const [dir, setDir] = useState('fwd') // which way the last step change moved
   const [attempt, setAttempt] = useState(0)
+  const [legIndex, setLegIndex] = useState(0)
+  const [arrivedOnMap, setArrivedOnMap] = useState(false)
+  const [showDirections, setShowDirections] = useState(directionsShown)
   // Resolve typed phrases ("floor 1 bathroom") to a value the backend understands.
   // Unknown values pass through untouched and the backend 422s them (handled below).
   const resolvedDest = resolvePlace(dest)
@@ -114,6 +121,8 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
     setResponse(null)
     setError('')
     setI(0)
+    setLegIndex(0)
+    setArrivedOnMap(false)
     setDir('fwd')
     const to = resolvedDest
     const run = (opts) => (api?.route || route)(opts, { signal: controller.signal })
@@ -141,7 +150,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   }, [from, resolvedDest, accessible, heading, requestKey, attempt, api])
 
   // Short vibration on each step change, where supported and motion is allowed.
-  useEffect(() => { if (data) tick(15) }, [i, data])
+  useEffect(() => { if (data) tick(15) }, [i, legIndex, data])
 
   if (error && error.key === requestKey) {
     return (
@@ -173,7 +182,8 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   }
 
   const steps = compactSteps(data.steps || [], stepKind)
-  const arrived = i >= steps.length
+  const legs = usableLegs(data)
+  const arrived = i >= steps.length || arrivedOnMap
   const step = steps[i]
   const kind = step ? stepKind(step.instruction) : null
   const vertical = !arrived && isVertical(kind)
@@ -214,6 +224,18 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
   const last = i === steps.length - 1
   const meters = step?.meters > 0 ? Math.max(1, Math.round(step.meters)) : 0
   const tapHint = last ? 'Tap when you arrive' : vertical ? 'Tap when you’re out' : 'Tap when you’re there'
+
+  if (legs && !arrived) {
+    return (
+      <RouteMap legs={legs} steps={steps} legIndex={legIndex} reduced={reduced} dir={dir}
+        fromText={fromText} destText={destText} accessible={accessible} estSeconds={data.est_seconds}
+        totalMeters={data.total_meters} roomLabels={roomLabels} onRestart={onRestart}
+        showDirections={showDirections}
+        onToggleDirections={() => { setDirectionsShown(!showDirections); setShowDirections(!showDirections) }}
+        onLeg={(next) => { setDir(next >= legIndex ? 'fwd' : 'back'); setLegIndex(next) }}
+        onArrive={() => setArrivedOnMap(true)} />
+    )
+  }
 
   return (
     <main className="flex flex-1 flex-col gap-5 pt-5">
@@ -276,6 +298,98 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
         ) : (
           <button onClick={onRestart} className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night">Find another room</button>
         )}
+      </div>
+    </main>
+  )
+}
+
+// Words for one step in the optional directions list.
+function stepWords(step, roomLabels) {
+  const kind = stepKind(step.instruction)
+  const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
+  if (isVertical(kind)) {
+    const badge = floorBadge(step.instruction)
+    return { kind, text: moveLabel(kind, badge ? floorName(badge === 'B1' ? -1 : Number(badge)) : '') }
+  }
+  const join = kind === 'walk' ? ' ' : ' toward '
+  return { kind, text: `${moveLabel(kind)}${toward ? join + lowerFirst(toward) : ''}` }
+}
+
+// The route screen when the backend sends drawable legs: one floor at a time,
+// path first. A floor change is a card the user taps once they're off the
+// elevator; the next floor's path then draws in. Text directions are optional.
+function RouteMap({ legs, steps, legIndex, reduced, dir, fromText, destText, accessible, estSeconds, totalMeters,
+  roomLabels, onRestart, showDirections, onToggleDirections, onLeg, onArrive }) {
+  const leg = legs[legIndex]
+  const groups = stepsByLeg(steps, stepKind, legs.length)
+  const legSteps = groups ? groups[legIndex] : steps
+  const remaining = Math.round((groups ? groups.slice(legIndex).flat() : steps)
+    .reduce((a, s) => a + (s.meters || 0), 0))
+  const mins = Math.max(1, Math.round((estSeconds * (remaining / (totalMeters || 1))) / 60))
+  const floor = floorName(leg.floor)
+  const roomNumber = (destText.match(/\b(B?\d{2,3}[A-Z]?)\b/) || [])[1] || ''
+  const anim = reduced ? '' : (dir === 'fwd' ? 'sign-fwd' : 'sign-back')
+  const pathLabel = leg.exit
+    ? `Your path on ${floor}, from you to the ${leg.exit.mode === 'stairs' ? 'stairs' : 'elevator'}.`
+    : `Your path on ${floor}, from you to ${destText}.`
+
+  return (
+    <main className="flex flex-1 flex-col gap-4 pt-5">
+      <header>
+        {fromText && <p className="text-sm text-mist">From {fromText}</p>}
+        <h2 className="font-display text-[36px] font-semibold leading-[1.02]">To {destText}</h2>
+        <p className="mt-1 text-base text-mist">{remaining} m to go, about {mins} min.</p>
+        {accessible && <p className="mt-1.5 flex items-center gap-1.5 text-sm"><ElevatorIcon size={18} />Elevators only</p>}
+      </header>
+
+      <section key={legIndex} className={`${anim} flex flex-col gap-2`}>
+        <p className="flex items-baseline justify-between text-sm">
+          <span className="font-display text-xl font-semibold">{floor}</span>
+          {legs.length > 1 && <span className="text-mist">Part {legIndex + 1} of {legs.length}</span>}
+        </p>
+        <RoutePath points={leg.points} exitMode={leg.exit?.mode} endLabel={roomNumber} label={pathLabel} />
+      </section>
+
+      <button onClick={leg.exit ? () => onLeg(legIndex + 1) : onArrive}
+        className="press block w-full overflow-hidden rounded-[3px] bg-snow text-left text-night">
+        <span className="flex items-center gap-3 px-4 py-3.5">
+          {leg.exit?.mode === 'elevator' && <ElevatorIcon size={28} />}
+          <span className="min-w-0">
+            <span className="block font-display text-[24px] font-semibold leading-[1.05]">
+              {leg.exit ? exitLabel(leg.exit) : `Follow the line to ${destText}`}
+            </span>
+            <span className="mt-1 block text-sm text-[#4A4A4A]">
+              {leg.exit ? `Tap when you’re on ${floorName(leg.exit.to_floor)}` : 'Tap when you arrive'}
+            </span>
+          </span>
+        </span>
+      </button>
+
+      <div>
+        <button onClick={onToggleDirections} aria-expanded={showDirections} className={linkClass}>
+          {showDirections ? 'Hide directions' : 'Show directions'}
+        </button>
+        {showDirections && (
+          <ol className="mt-1 space-y-2.5">
+            {legSteps.map((step, index) => {
+              const { kind, text } = stepWords(step, roomLabels)
+              const meters = step.meters > 0 ? Math.max(1, Math.round(step.meters)) : 0
+              return (
+                <li key={`${step.node}-${index}`} className="flex items-center gap-3 text-base">
+                  <TurnIcon kind={kind} />
+                  <span className="min-w-0 flex-1">{text}</span>
+                  {meters > 0 && <span className="text-sm text-mist">{meters} m</span>}
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </div>
+
+      <div className="mt-auto flex justify-between gap-4 pt-2">
+        <button onClick={() => onLeg(Math.max(0, legIndex - 1))} disabled={legIndex === 0}
+          className={`${linkClass} disabled:text-[#5C5C5C] disabled:no-underline`}>Back</button>
+        <button onClick={onRestart} className={linkClass}>Lost? Take a new photo</button>
       </div>
     </main>
   )
