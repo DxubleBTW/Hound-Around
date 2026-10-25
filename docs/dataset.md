@@ -2,6 +2,27 @@
 
 Hallway frames of BU's Center for Computing & Data Sciences (665 Commonwealth Ave), used to recognize where a phone photo was taken. **No images are published.** This card describes them.
 
+## Current totals (Sun Oct 25, 2026)
+
+The sections further down describe the first Saturday-morning session. Since then we added Saturday afternoon and
+evening phone rounds (all three floors), an Insta360 pass of floor 1, and the Friday Oct 23 evening walk of public
+areas. Totals across every labeled dataset:
+
+| | |
+| --- | ---: |
+| Videos | 67 (60 phone, 7 Insta360) |
+| Frames extracted at 2 fps | 13,000 |
+| Kept and labeled | 8,537 (B1 2,442 · F1 3,534 · F2 2,561) |
+| Not mapped to a graph spot (held for review) | 3,129 |
+| Rejected: blurry | 1,245 |
+| Rejected: near-duplicate | 59 |
+| Excluded: restricted area | 30 |
+| Spots with frames | 57 |
+| Frames in the deployed search index (capped per spot) | 7,008 |
+
+Evaluation is leave-one-video-out: each of the 1,758 at-spot queries behind the README's results comes from a video
+whose frames were removed from the index. Outsider photos are a separate test split and are never used for tuning.
+
 ## Collection
 
 | | |
