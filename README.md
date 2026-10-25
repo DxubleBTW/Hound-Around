@@ -9,8 +9,8 @@ Built at BU Spark! **DS+X 2026**, College Hack track.
 | | |
 | --- | --- |
 | Live app (open on a phone) | **https://www.hound-around.tech** |
-| Slide deck | [SLIDES LINK] |
-| Setup and demo video | [VIDEO LINK] |
+| Slide deck | [Slides (PDF)](https://drive.google.com/file/d/1XJXfY8zHaPTgAk8FIa_SSeGWACtklozV/view?usp=sharing) |
+| Setup and demo video | [Video (3:42)](https://drive.google.com/file/d/17V1eUzEqD2ANeJhCyQQmeTjCmHt3XI8r/view?usp=sharing) |
 | Backend API | https://dribeiro0-hound-around.hf.space (`/health`) |
 
 ## Contents
