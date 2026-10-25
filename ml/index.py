@@ -15,10 +15,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ml.embedder import DIM, normalize
+from ml.embedder import DIM, INDEX_VIEWS, normalize
 
-# A correction vote counts as this many video votes (design.md §3).
-CORRECTION_WEIGHT = 3
+# A correction vote counts as this many video votes (design.md §3): 3 frames'
+# worth, and every video frame is len(INDEX_VIEWS) rows. Scaling it keeps one
+# correction learning as often as before multi-view (83% next-frame flips,
+# 2.9% hijacks vs 3.7% before; ml/research/backend_eval.py).
+CORRECTION_WEIGHT = 3 * len(INDEX_VIEWS)
 
 
 class VectorIndex:
