@@ -4,6 +4,7 @@ import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
 import SecondPhoto from './screens/SecondPhoto.jsx'
 import { nextStep } from './lib/tiers.js'
+import { journeyMetrics } from './lib/journeyMetrics.js'
 import { spotName } from './lib/spots.js'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
@@ -61,6 +62,7 @@ export default function App() {
 }
 
 function Navigation({ api, building, motion, onSchoolChange }) {
+  useEffect(() => () => journeyMetrics.cancel(), [])
   const { MOCK, health } = api
   const [screen, setScreen] = useState('snap')
   const [dest, setDest] = useState(() => {
@@ -104,11 +106,13 @@ function Navigation({ api, building, motion, onSchoolChange }) {
   }, [MOCK, health])
 
   const restart = () => {
+    journeyMetrics.retake()
     if (photo?.url) URL.revokeObjectURL(photo.url) // drop the local preview; nothing is kept
     setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('snap')
   }
 
   const chooseStart = () => {
+    journeyMetrics.manual()
     if (photo?.url) URL.revokeObjectURL(photo.url)
     setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('manual')
   }
@@ -184,7 +188,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
           <Snap
             dest={dest} setDest={setDest}
             accessible={accessible} setAccessible={setAccessible}
-            onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
+            onPhoto={(p) => { journeyMetrics.begin(p.startedAt); setPhoto(p); setScreen('locating') }}
             onManual={chooseStart}
             onBrowse={() => setPlacesOpen(true)}
             destinations={building.destinations}
@@ -200,6 +204,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
             onCancel={restart}
             onManual={chooseStart}
             api={api}
+            onRejected={() => journeyMetrics.rejected()}
             buildingLabel={building.shortName || building.name}
           />
         )}
@@ -218,7 +223,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
               setHere(spot)
               if (learned) {
                 const size = Number.isFinite(learned) ? learned : null
-                flash('Got it. The next person here gets it right.', size ? `Hallway views: ${size.toLocaleString()}` : '', true)
+                flash('Thanks. Your correction was saved.', size ? `Hallway views: ${size.toLocaleString()}` : '', true)
               }
               setScreen('route')
             }}
@@ -241,6 +246,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
         )}
         {screen === 'route' && (
           <Route
+            onReady={() => journeyMetrics.ready()}
             from={here} heading={here === loc?.spot ? loc?.heading : undefined}
             dest={dest} accessible={accessible}
             onRestart={restart}

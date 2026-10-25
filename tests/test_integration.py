@@ -85,7 +85,7 @@ def test_real_components_complete_photo_route_correct_loop(tmp_path, monkeypatch
             'heading': second['heading']})
         assert final_route.status_code == 200
         assert final_route.json()['total_meters'] == 10
-        assert client.post('/correct', json={'photo_id': first['photo_id'], 'true_spot': b}).status_code == 410
+        assert client.post('/correct', json={'photo_id': first['photo_id'], 'true_spot': b}).json() == corrected.json()
         client.app.state.rollback_last_correction()
         assert client.get('/health').json()['index_size'] == 10
         after_rollback = client.post('/locate', files={'image': ('generated.png', raw, 'image/png')}).json()

@@ -113,6 +113,23 @@ Place-recognition descriptors (MegaLoc, BoQ) are wired into `ml/research/embed.p
 
 ## Changed behavior the team should know
 
+Local reliability branch (Oct 25; not deployed): OCR floor changes now update the
+confidence/heading evidence and constrain both-photo fusion. Correction retries use
+durable receipts. Admission bounds recognition to one active upload/inference;
+health/routing remain responsive while the model runs. Versioned confidence and
+private runtime manifests bind decisions and deployed artifacts. Without matching
+confidence calibration, production recognition asks the user to choose from the
+picker instead of starting a route automatically. Aggregate stage timings and
+page-memory photo-to-route/recovery measurements contain no location/user labels.
+Real calibration, CPU/load measurements, phone acceptance and deployment remain
+operator tasks; no new recognition accuracy is claimed.
+Verification against the MegaLoc rollout on current main: 194 Python tests pass
+(1 optional OpenCV pipeline test module skipped), 86 frontend tests and production
+build pass. A 390px mobile-browser smoke check covered rejection/retake, manual
+recovery, second-photo confirmation and local metrics with generated photos and
+synthetic API responses. Python was 3.14 locally; CI verifies required Python 3.11.
+Setup and migration: [recognition reliability](recognition-reliability.md).
+
 - **Confidence** is now the winner's votes plus votes for spots within 8 m on the same floor, / 10 (it was winner's
   votes / 10). Look-alike neighbors split the vote but the route starts in the same place. `top3` vote counts are
   unchanged. This cut picker prompts from 82% to 62% with no accuracy loss. `docs/contract.md` should say so; agree it

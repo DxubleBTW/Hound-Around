@@ -313,9 +313,12 @@ URL for a real build; see [`frontend/README.md`](frontend/README.md).
 - **Frontend:** Vercel builds `frontend/` from `main`.
 - **Backend:** the root `Dockerfile` (`python:3.11-slim`, port 7860, non-root user) builds the API with CPU PyTorch
   and bakes the model weights in at build time (`--build-arg EMBEDDER=megaloc` for MegaLoc). At startup
-  `scripts/start.sh` pulls `graph.json`, `rooms.json` and `index.npz` from a **private** Hugging Face dataset using an
-  `HF_TOKEN` secret, so private files never enter the public Space or this repo. One Uvicorn worker, with
-  `--proxy-headers` so the per-client rate limit works behind the Hugging Face proxy.
+  `scripts/start.sh` pulls a pinned snapshot (graph, rooms, index, confidence calibration) from a **private** Hugging
+  Face dataset using an `HF_TOKEN` secret, so private files never enter the public Space or this repo. One Uvicorn
+  worker, with `--proxy-headers` so the per-client rate limit works behind the Hugging Face proxy.
+- [Recognition reliability and rollout](docs/recognition-reliability.md): versioned confidence, atomic package
+  switching, bounded inference, correction retries that learn once, and privacy-preserving measurements. Missing
+  calibration falls back to the picker; incompatible artifacts report not ready. Roll code and data back together.
 - Corrections persist across restarts only if `HOUND_STATE_DIR` points at persistent storage; see
   [`docs/navigation-features-proposal.md`](docs/navigation-features-proposal.md).
 

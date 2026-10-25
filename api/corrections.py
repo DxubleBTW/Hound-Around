@@ -10,11 +10,14 @@ import os
 
 import numpy as np
 
+from ml.artifacts import DECISION_VERSION
+
 
 def index_context(data_dir, model, router):
     digest = hashlib.sha256(model.model_name.encode('utf-8'))
+    digest.update(DECISION_VERSION.encode('ascii'))
     digest.update(os.getenv('HOUND_DATASET_ID', str(data_dir.resolve())).encode('utf-8'))
-    for name in ('index.npz', 'graph.json'):
+    for name in ('index.npz', 'graph.json', 'rooms.json'):
         path = data_dir / name
         digest.update(name.encode('ascii'))
         if path.exists():
@@ -36,6 +39,9 @@ class CorrectionStore:
                    'context TEXT NOT NULL, vector BLOB NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS index_versions ('
                    'context TEXT PRIMARY KEY, version INTEGER NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS correction_receipts ('
+                   'photo_id TEXT PRIMARY KEY REFERENCES corrections(photo_id) ON DELETE CASCADE, '
+                   'index_size INTEGER NOT NULL)')
         db.commit()
 
     @property
@@ -60,10 +66,19 @@ class CorrectionStore:
             records.append((photo_id, label, vector))
         return records
 
-    def add(self, photo_id, vector):
+    def receipt(self, photo_id):
+        return self.db.execute(
+            'SELECT c.true_spot, r.index_size FROM corrections c '
+            'JOIN correction_vectors v ON v.photo_id = c.photo_id '
+            'LEFT JOIN correction_receipts r ON r.photo_id = c.photo_id '
+            'WHERE c.photo_id = ? AND v.context = ?', (photo_id, self.context)).fetchone()
+
+    def add(self, photo_id, vector, index_size=None):
         # Caller owns the encompassing SQLite transaction and index rollback.
         self.db.execute('INSERT INTO correction_vectors VALUES (?, ?, ?)',
                         (photo_id, self.context, vector.astype('<f4').tobytes()))
+        if index_size is not None:
+            self.db.execute('INSERT INTO correction_receipts VALUES (?, ?)', (photo_id, index_size))
         self.advance_version()
 
     def remove(self, photo_id):

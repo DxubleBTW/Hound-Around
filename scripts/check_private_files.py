@@ -13,7 +13,8 @@ def violations(paths):
         docs_diagram = lower.startswith('docs/img/') and path.suffix.lower() == '.png'
         private = (
             lower.startswith('data/')
-            or basename in ('graph.json', 'rooms.json', 'index.npz', 'corrections.sqlite')
+            or basename in ('graph.json', 'rooms.json', 'index.npz', 'corrections.sqlite',
+                            'recognition.json', 'confidence.json', 'runtime-manifest.json')
             or path.suffix.lower() in ('.mov', '.mp4', '.m4v', '.avi', '.mkv', '.heic', '.jpg', '.jpeg', '.pdf', '.npz', '.sqlite', '.db')
             or '.sqlite-' in basename or '.db-' in basename
             or (path.suffix.lower() in ('.png', '.webp', '.tiff', '.tif') and not docs_diagram)

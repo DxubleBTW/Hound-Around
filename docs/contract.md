@@ -74,15 +74,34 @@ Route instructions start with one of: `Walk`, `Continue`, `Turn left and walk`, 
 "Turn around"); smaller bends merge into the previous step. A destination door beside the corridor ends with
 ", on your left" / ", on your right" instead of a turn, and doors passed mid-route never count as turns.
 
-Confidence = winning votes / 10. `ocr_room` / `ocr_floor` are null when nothing is read.
+Confidence sums weighted votes for the winner and same-floor spots within 8 walking
+meters, divided by 10 (20 when combining two photos), capped at 1.
+`ocr_room` / `ocr_floor` are null when nothing is read. When OCR identifies a floor
+with indexed candidates, voting, confidence features and heading use retrieval
+from that floor. Both-photo fusion respects the current photo's OCR floor.
 
 `p_correct` is the calibrated chance the spot is right (within 10 m, right floor; `ml/calibration.py`), and `tier`
 says what the app does next: `auto` (p ≥ 0.7 and the top 3 agree on the floor) goes straight to the route with a
 "Not here?" link; `picker` (0.5 ≤ p < 0.7, or floors split) shows the top 3; `second` (p < 0.5) asks for one more
 photo facing the other way. That photo is sent with `previous` = the first `photo_id`; the backend adds both
 photos' votes and answers `tier: "picker"`, `p_correct: null` (never a third photo). An expired `previous` (photos
-are kept 10 minutes) falls back to a single-photo answer. Both fields are null from uncalibrated backends; the app
-then uses the old rule (picker below 0.6 or when the top 3 span floors).
+are cached 10 minutes) falls back to a single-photo answer. Only vectors and prediction
+metadata are cached, never photos. Production confidence requires a private
+`confidence.json` bound to the model, decision version and exact index/graph/rooms.
+Without that artifact, the production matcher returns `p_correct: null, tier: "picker"`.
+An incompatible artifact makes recognition unavailable. Legacy/custom backends may
+return both fields null; the app then uses its previous confidence rule.
+
+`/locate` admits one active upload/inference per process. Excess requests receive
+503 and `Retry-After: 1` before upload buffering. Health and route requests remain
+independent of inference; no success fields or endpoints are added.
+
+`/correct` retries with an identical `{photo_id, true_spot}` return the original
+successful receipt without learning twice, including after a restart with the same
+correction context. The same corrected photo with a different `true_spot` returns
+409. Unknown or expired photos still return 410. Rollback removes the receipt too.
+Legacy durable records without a stored receipt return the current index size.
+See [reliability rollout](recognition-reliability.md) for calibration and package setup.
 
 ### Unrecognized-photo error
 

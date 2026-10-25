@@ -6,7 +6,7 @@
 # the app from starting and reporting its own readiness state.
 set -u
 
-python scripts/fetch_data.py || true
+python -m scripts.fetch_data || true
 
 # --proxy-headers + --forwarded-allow-ips='*' resolve the real client IP behind
 # the HF Space proxy so the per-peer rate limiter (api/main.py) buckets judges
@@ -19,5 +19,6 @@ exec python -m uvicorn api.main:app \
   --port 7860 \
   --workers 1 \
   --no-access-log \
+  --log-config api/logging.json \
   --proxy-headers \
   --forwarded-allow-ips='*'

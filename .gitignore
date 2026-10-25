@@ -12,6 +12,9 @@ data/
 
 # Large artifacts (index ships to the Space separately)
 *.npz
+recognition.json
+confidence.json
+runtime-manifest.json
 *.sqlite
 *.sqlite-*
 *.db

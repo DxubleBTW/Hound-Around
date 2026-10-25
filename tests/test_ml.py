@@ -626,7 +626,12 @@ def test_calibrated_tiers():
 def test_locate_reports_p_correct_and_tier():
     red, green = (255, 0, 0), (0, 128, 0)
     index = make_index([(red, 'F1_a', 'video')] * 10 + [(green, 'F2_c', 'video')])
-    result = build(index).locate(solid(red))
+    backend = build(index)
+    assert backend.locate(solid(red))['tier'] == 'picker'
+    assert backend.locate(solid(red))['p_correct'] is None
+    from ml.calibration import Model, COEF, INTERCEPT
+    backend.confidence_model = Model(COEF, INTERCEPT)
+    result = backend.locate(solid(red))
     assert 0 <= result['p_correct'] <= 1
     assert result['tier'] in ('auto', 'picker', 'second')
 

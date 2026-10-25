@@ -23,6 +23,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const startedAt = performance.now()
     const request = ++preparation.current
     setHint('')
     setBusy(true)
@@ -34,7 +35,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
         setHint('That looked blurry or blank. Step back and point down the hallway or at a room number.')
         return
       }
-      onPhoto({ blob, url: URL.createObjectURL(blob) })
+      onPhoto({ blob, url: URL.createObjectURL(blob), startedAt })
     } catch (err) {
       if (active.current && request === preparation.current) setHint(err?.message || 'We could not prepare this photo. Take another photo or choose a JPEG or PNG file.')
     } finally {

@@ -30,11 +30,13 @@ Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it befo
 3. Index (`ml/build_index.py`): up to 250 phone frames per spot (40 for 360 clips), each stored as whole + left +
    right crops, plus a per-row `heading` array (the direction the matched frames face).
 4. `ml/index.py` vote: cosine top-10; a correction that is the #1 neighbor wins.
-5. Confidence: `ml/calibration.py` maps five features (vote confidence, raw share, top similarity, margin to the
+5. Confidence: private `confidence.json` loaded by `ml/calibration.py` maps five features (vote confidence, raw share, top similarity, margin to the
    next spot, top-3 floors split) to P(correct). Tiers: P ≥ 0.7 and one floor → auto; ≥ 0.5 → picker;
    else ask for a second photo (`/locate` with `previous=<photo_id>` adds both photos' votes, then picker).
-   Refit the constants with `ml/research/calibrate.py` whenever the index or descriptor changes.
-6. OCR runs only when unsure or floors disagree; a read floor/room re-votes on that floor.
+   Refit with `python -m ml.research.calibrate_confidence` whenever model, index, graph, rooms or decision logic changes.
+   Missing calibration means picker-only; incompatible calibration makes recognition unavailable.
+6. OCR runs only when unsure or floors disagree; a read floor/room constrains voting, heading and confidence
+   evidence to that floor, including both-photo fusion.
 7. Routing (`api/routing.py`): shortest path on `cost`; accessible = no stairs. Turns need ≥ 45° (≥ 150° = turn
    around); a destination door beside the corridor says "on your left/right". `/route` also returns `legs`
    (one per floor, points normalized to that leg) for the drawn path.
@@ -59,6 +61,11 @@ Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it befo
 - Graph: data/graph_walksheets.json + data/graph_patch.json → `pipeline/api_graph.py` → graph.json + rooms.json.
 
 ## Deploy (backend; ask the data lead first)
+Runtime manifests and pinned private snapshot activation are documented in `docs/recognition-reliability.md`.
+Create compatible `confidence.json` / `runtime-manifest.json` before enabling strict package validation.
+Correction retries are idempotent; keep one worker and persistent state. One locate request is admitted at a time;
+health/routing use separate state. No new public telemetry endpoints or user tracking are permitted.
+
 1. Record the Space and dataset revisions (rollback = both together).
 2. Index/graph change → upload to the private dataset → restart the Space. Code change → archive api, ml (minus
    ml/research), scripts, Dockerfile, requirements → upload to the Space. Preprocessing changes ship code and

@@ -109,3 +109,15 @@ Add `VITE_API_URL` under Environment Variables, then redeploy (Vite bakes it in 
 - The photo preview URL is revoked on restart; nothing is stored client-side.
 - Node ids come only from the backend. `src/lib/spots.js` formats them for display, it never invents them.
 - No images in the repo (`.gitignore` blocks png/jpg); icons are inline SVG.
+
+
+## Local reliability measurements
+
+`VITE_LOCAL_METRICS=1` exposes `window.houndMetrics()` for a local diagnostic build.
+Only aggregate photo-to-route timings and recovery counts remain in page memory;
+nothing is uploaded or persisted, and a route response is not proof of arrival.
+The server tier controls picker/second-photo/automatic starts; absent production
+confidence calibration uses the picker. Correction retries are idempotent, and
+conflicting correction labels receive retake guidance. See the
+[reliability guide](../docs/recognition-reliability.md) for the repeatable synthetic
+mobile-browser smoke check and real-photo release requirements.

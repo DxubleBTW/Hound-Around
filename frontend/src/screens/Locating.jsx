@@ -8,7 +8,7 @@ const STACK = [
   { '--r': '5deg', '--sx': '46px', '--sy': '24px', '--sr': '16deg', background: 'var(--color-rule)', animationDelay: '60ms' },
 ]
 
-export default function Locating({ photo, previous, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
+export default function Locating({ photo, previous, onDone, onCancel, onManual, onRejected, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
   const [attempt, setAttempt] = useState(0)
@@ -31,6 +31,7 @@ export default function Locating({ photo, previous, onDone, onCancel, onManual, 
       .catch((e) => {
         // Aborts come from retake/unmount only; that path unmounts us, so ignore it.
         if (!live || e?.name === 'AbortError') return
+        if (e?.code === 'unrecognized_location') onRejected?.()
         setError(e)
       })
 

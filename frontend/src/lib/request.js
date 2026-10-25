@@ -11,11 +11,14 @@ export class ApiError extends Error {
 
 function responseError(status, operation) {
   const messages = {
-    410: 'This photo has expired or was already corrected. Take another photo to teach this spot again.',
+    410: 'This photo is unavailable or expired. Take another photo to teach this spot again.',
     413: 'The photo is too large. Take another photo and try again.',
     415: 'This photo format is not supported. Try a JPEG or PNG photo.',
     429: 'Too many attempts. Wait a minute before trying again.',
     503: 'The service is not ready yet. Wait a moment and try again.',
+  }
+  if (status === 409 && operation === 'correct') {
+    return new ApiError('This photo was already corrected to another spot. Take a new photo to correct again.', { status })
   }
   if (status === 404 && operation === 'route') {
     return new ApiError('No route is available for this destination and route setting. Try another destination.', { status })

@@ -1,8 +1,10 @@
 **
 !requirements.txt
 !requirements-core.txt
+!Dockerfile
 !api/
 !api/*.py
+!api/logging.json
 !ml/
 !ml/*.py
 !scripts/
