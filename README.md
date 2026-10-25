@@ -339,11 +339,14 @@ URL for a real build; see [`frontend/README.md`](frontend/README.md).
 
 | Name | Role |
 | --- | --- |
-| David Ribeiro | Backend, data pipeline, matching, deployment |
-| Avery Lee | [role] |
-| Jun Olea | [role] |
-| [Name] | [role] |
-| [Name] | [role] |
+| David Ribeiro | ML and data: matching, evaluation, filming and labeling pipeline |
+| Jun Olea | Backend: API, routing, corrections, reliability |
+| Avery Lee | Frontend and Kiro: phone app, spec, steering and hooks |
+| Tobi | Data and workflow |
+| Bryan Martinez | Pitch, design and testing |
+
+All five of us worked on the pitch and design, verification, and regression testing through GitHub pull requests and
+CI.
 
 ## Credits
 
