@@ -27,6 +27,11 @@ AT_SPOT_S = 6
 
 def session(video):
     """Filming sessions on Saturday, from the clip numbers."""
+    num = int(video[4:]) if video[4:].isdigit() else 0
+    if num >= 2984 and video.startswith(("IMG_29", "IMG_30")):
+        return "5pm"
+    if num == 8633 or 8774 <= num <= 8799:
+        return "4pm"
     if video.startswith("IMG_29") or video in ("IMG_4521", "IMG_4522"):
         return "8am"
     if video.startswith("IMG_86"):

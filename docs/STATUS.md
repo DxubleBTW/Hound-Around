@@ -1,15 +1,15 @@
 # Hound Around: where things stand
 
-Last updated Sat Oct 24, 2026, 1:45 PM, by David. Read this first, then `CLAUDE.md`, `docs/contract.md` and your file in
+Last updated Sat Oct 24, 2026, 11:30 PM, by David. Read this first, then `CLAUDE.md`, `docs/contract.md` and your file in
 `docs/roles/`. Coding agents: treat this as the current state of the project. Update it when something here changes.
 
 ## Live links
 
 | What | Where | State |
 | --- | --- | --- |
-| Front end | https://hound-around-theta.vercel.app | Up, but on **mock data** until `VITE_API_URL` is set in Vercel (Avery; see `docs/handoff-vercel-backend.md`) |
-| Backend API | https://dribeiro0-hound-around.hf.space | **Live and healthy**: `/health` → `ok: true`, 2,375 vectors, 53 spots |
-| Backend Space | huggingface.co/spaces/dribeiro0/hound-around | Public Docker Space (David's account), deployed from `main` at `c55ebfa` |
+| Front end | https://www.hound-around.tech (also hound-around-theta.vercel.app) | Up on the **real backend**, with the retake / choose-start screens |
+| Backend API | https://dribeiro0-hound-around.hf.space | **Live and healthy**: `/health` → `ok: true`, **3,263 vectors, 57 spots** (index v3, deployed Sun 12:09 AM: Friday + Saturday phone walks, confirmed room clips, 360 views). Dataset revision `ead1404`; previous `c9b5f76` |
+| Backend Space | huggingface.co/spaces/dribeiro0/hound-around | Public Docker Space (David's account), deployed from `main` at `0f7bf8d` (Space commit `84e4168`). Rejection code is live but **off** (no `recognition.json` yet) |
 | Private data | HF dataset `dribeiro0/hound-around-data` | `index.npz`, `graph.json`, `rooms.json`. Private; the Space reads it with a read-only `HF_TOKEN` secret |
 
 Live checks at 1:30 PM: two held-out hallway photos came back as the right spot in 0.7–0.9 s; an accessible route from
@@ -28,14 +28,27 @@ the west entrance to Room 164 came back as 3 steps, 65 m; CORS allows the produc
   documented in `frontend/README.md`. Production still needs the Vercel environment/redeploy handoff below.
 - **Core loop end to end through the real API:** photo → spot + floor → route (accessible mode uses elevators) →
   correction goes live in the index.
-- **Data:** about 2,400 face-blurred, labeled frames from three filming sessions Saturday morning: B1 (3 walks), F1
-  (17 one-spot clips + 1 walk), F2 (5 walks). Never in this repo.
+- **Data:** about 7,100 face-blurred, labeled frames: Saturday-morning sessions plus a 4–6 PM round (31 phone videos:
+  B1/F1/F2 walks and one-spot room clips) and a 10:40 PM Insta360 pass of the F1 east end (7 videos, cut into
+  phone-like views without stitching). Never in this repo.
 - **Graph:** 61 spots on B1/F1/F2, all connected. Room aliases: 164 (opening/closing ceremony), B62, B64A, 220
   (CS Builds), 262–265 (hacking rooms), Spark (incubator lab, F2 west).
 - **Tests:** `python -m pytest -q` → 66 passed (API, ML, eval, property tests, plus regressions for every finding in
   the Kiro code review).
 
 ## Accuracy so far (real footage, not outsider photos yet)
+
+**Update, Sat night (34 phone videos, 1,570 test frames, shipped backend):** exact 28%, within 10 m 52%, right floor
+74%, user success 55%, a correction learns 82%, wrong-spot correction hijacks 3.5% (was 5.1%). F1 is now properly
+measured (328 test frames instead of 48): user success 48%.
+
+- **More phone footage barely moved accuracy.** On the same 1,077 test frames, adding the afternoon round went from
+  27.9% to 28.4% top-1 (F1 top-3 31% → 48% was the one real gain). The errors are look-alike spots, not missing data.
+- **360 footage:** sharing the per-spot cap with phone frames hurt (top-3 at those spots 33% → 19%); added on top
+  (max 40 views per spot) it was neutral overall and slightly better at its spots, and it gave F1_south_stair its
+  first footage. The index builder now caps 360 views separately.
+
+Morning numbers, kept for comparison:
 
 Leave-one-video-out: train on every other video, test on 1,077 frames taken right at a spot. This is the honest
 in-building number; the outsider test set will be the headline number.
@@ -70,7 +83,7 @@ in-building number; the outsider test set will be the headline number.
 - **No index → the API reports 503** ("not ready") instead of answering with a made-up location.
 - **The OCR floor override** now re-ranks within that floor, so the app's answer is always the first picker option.
 
-## Navigation feature branch (awaiting review and deployment)
+## Navigation features (merged in PR #18; backend deployed Sat 5 PM)
 
 `feat/navigation-fallbacks` adds manual starting-room entry, public destination
 suggestions, a pixel mascot school/building picker, restart-safe correction vectors
@@ -103,10 +116,9 @@ Setup commands and limitations: [navigation features](navigation-features-propos
 | Priority | Task | Owner |
 | --- | --- | --- |
 | 1 | **Outsider test photos:** 30–50 photos from people not on the team, named `TEST_<spot>_NN.jpg`, to David's Drive. Needed for the go/no-go and the headline accuracy number | Anyone |
-| 2 | Set `VITE_API_URL=https://dribeiro0-hound-around.hf.space` in Vercel and redeploy (`docs/handoff-vercel-backend.md`) | Avery |
 | 3 | **Film F1 again**, a second session: 360° clips at every F1 spot, plus `class24`, `class48`, `south_stair`, `cafe_entry`, `restrooms_w`, `stair_east`. F1 is the demo floor | Data (David) |
 | 4 | F2 360° clips for one-video spots (`hall_w`, `hall_ne`, `hall_north`, `core_elev`, `core_e`, `csbuilds`, `open_study`, `class20`, `class48c`) and the missing `class48a`; close-ups of room-number signs | Data |
-| 5 | Confirm which doors are 262, 263, 264, 265 and B62 (current mapping is inferred from walk order) | Anyone on site |
+| 5 | Confirm which doors are 262, 263, 264, 265, B62 and B64B. Clips of these rooms exist but stay unlabeled until confirmed (embeddings can't tell the black doors apart). Also confirm the on-site notes "F1 stair east does not exist" and F1 class48 | Anyone on site |
 | 6 | Integration PR #15 is merged. Review/deploy the new navigation feature branch using the activation checklist above | Backend + Front end |
 | 7 | Phone test on event Wi-Fi and cellular | Front end |
 | 8 | Interviews (~10), stranger timing test, slides, demo script, backup video. **Devpost project tonight; submit by Sun 10 AM** | Pitch |
