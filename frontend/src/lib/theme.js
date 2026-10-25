@@ -12,6 +12,7 @@ function apply(theme) {
   const root = document.documentElement
   root.dataset.theme = theme
   root.style.background = BG[theme]
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', BG[theme])
   window.dispatchEvent(new CustomEvent('hound-theme', { detail: theme }))
 }
 

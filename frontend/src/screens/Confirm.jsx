@@ -4,26 +4,12 @@ import { floorName, floorOf, spotName } from '../lib/spots.js'
 import Icon from '../components/Icon.jsx'
 import { Button, Sheet, TextAction, TopBar, focusRing } from '../components/ui.jsx'
 
-// Preserve the existing very-low-confidence retake fallback. Vote agreement
-// measures uncertainty, not whether the photo belongs to the building. Actual
-// unrelated-photo rejection is performed by the calibrated backend similarity
-// guard and handled by Locating's 422 recovery path.
-const MIN_RELEVANCE = 0.2
-const PICKER_THRESHOLD = 0.6
-
-// Below MIN_RELEVANCE the top guess is too weak to trust as a location at all.
-function isIrrelevant(loc) {
-  return (loc.confidence || 0) < MIN_RELEVANCE
-}
-
-// In the uncertain band, or when the top 3 span floors, show the top-3 picker.
-function needsPicker(loc) {
-  const floors = new Set((loc.top3 || []).map((t) => floorOf(t.spot).code))
-  return loc.confidence < PICKER_THRESHOLD || floors.size > 1
-}
-
-export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
-  const [picking, setPicking] = useState(() => needsPicker(loc))
+// `mode` comes from lib/tiers.js: 'confirm' ("Right spot?"), 'picker' (top 3),
+// or 'retake' (the old very-low-confidence fallback for uncalibrated backends;
+// actual unrelated-photo rejection is the backend's 422, handled in Locating).
+// `fused` marks the picker after a second photo.
+export default function Confirm({ photo, loc, mode = 'confirm', fused = false, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
+  const [picking, setPicking] = useState(mode === 'picker')
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
   const pending = useRef(null)
@@ -34,7 +20,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
   useEffect(() => () => pending.current?.abort(), [])
 
   // Extremely uncertain answer: preserve the retake fallback and offer manual routing.
-  if (isIrrelevant(loc)) {
+  if (mode === 'retake') {
     return (
       <main className="rise flex flex-1 flex-col">
         <TopBar onBack={onRetake} backLabel="Retake photo" />
@@ -118,7 +104,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
           </section>
         ) : (
           <section>
-            <p className="text-[15px] text-dim">Hmm, not sure. Pick where you’re standing. Your pick teaches the app this spot for next time.</p>
+            <p className="text-[15px] text-dim">{fused ? 'We combined both photos. Pick where you’re standing.' : 'Hmm, not sure. Pick where you’re standing.'} Your pick teaches the app this spot for next time.</p>
             {loc.ocr_room && <p className="mt-2 flex items-center gap-2 text-[14px] text-dim"><Icon name="sign" size={18} />Saw sign: Room {loc.ocr_room}</p>}
             <ul className="mt-3">
               {(loc.top3 || []).map((t, i) => (

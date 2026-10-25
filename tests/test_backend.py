@@ -38,9 +38,10 @@ def router():
 class FakeML(StubBackend):
     model_name = 'test-model'
 
-    def locate(self, image):
+    def locate(self, image, previous=None):
         self.seen_size = image.size
         self.seen_exif = dict(image.getexif())
+        self.seen_previous = previous
         result = super().locate(image)
         result['confidence'] = 0.8
         result['top3'][0]['votes'] = 8
@@ -78,7 +79,7 @@ def test_locate_contract_and_privacy(backend, color):
     assert response.status_code == 200
     result = response.json()
     assert set(result) == {'photo_id', 'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'ms'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'ms'}
     assert result['spot'] == 'test_hall'
     assert result['photo_id'].startswith('p_')
     assert result['ms'] >= 0
@@ -97,6 +98,20 @@ def test_health_ready_and_missing_data(backend, tmp_path):
         assert empty.post('/correct', json={'photo_id': 'p_x', 'true_spot': 'unknown'}).status_code == 503
 
 
+def test_second_photo_passes_the_first_photos_vector(backend):
+    client, model, *_ = backend
+    first = locate(client).json()
+    assert model.seen_previous is None
+    files = {'image': ('query.jpg', photo('green'), 'image/jpeg')}
+    second = client.post('/locate', files=files, data={'previous': first['photo_id']})
+    assert second.status_code == 200
+    assert model.seen_previous is not None and model.seen_previous.shape == (384,)
+    # An expired or unknown id falls back to a single-photo answer.
+    unknown = client.post('/locate', files=files, data={'previous': 'p_' + '0' * 32})
+    assert unknown.status_code == 200 and model.seen_previous is None
+    assert client.post('/locate', files=files, data={'previous': 'not-an-id'}).status_code == 422
+
+
 def test_accessible_route_and_alias(backend):
     client, *_ = backend
     params = {'from': 'test_entry', 'to': 'test destination', 'accessible': True,
@@ -108,6 +123,37 @@ def test_accessible_route_and_alias(backend):
     assert result['est_seconds'] == 34
     params['accessible'] = False
     assert client.get('/route', params=params).json()['total_meters'] == 15
+
+
+def test_route_legs_one_per_floor(router):
+    legs = router.route('test_entry', 'test_room', accessible=True)['legs']
+    assert [(leg['floor'], leg['start'], leg['end']) for leg in legs] == [
+        (1, 'test_entry', 'test_lift'), (2, 'test_upper', 'test_room')]
+    assert legs[0]['exit'] == {'mode': 'elevator', 'to_floor': 2}
+    assert legs[-1]['exit'] is None
+    # Normalized per leg: inside the padded box, aspect kept, no raw coordinates.
+    assert legs[0]['points'] == [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9]]
+    assert legs[1]['points'] == [[0.1, 0.5], [0.9, 0.5]]
+    stairs = router.route('test_entry', 'test_room')['legs']
+    assert stairs[0]['exit'] == {'mode': 'stairs', 'to_floor': 2}
+    assert router.route('test_entry', 'test_entry')['legs'] == [
+        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]
+
+
+def test_route_legs_ride_through_floors():
+    graph = {'nodes': [
+        {'id': 'synthetic_b1', 'floor': -1, 'x': 0, 'y': 0},
+        {'id': 'synthetic_f1', 'floor': 1, 'x': 0, 'y': 0},
+        {'id': 'synthetic_f2', 'floor': 2, 'x': 0, 'y': 0},
+        {'id': 'synthetic_room', 'floor': 2, 'x': 0, 'y': 10},
+    ], 'edges': [
+        {'from': 'synthetic_b1', 'to': 'synthetic_f1', 'meters': 0, 'vertical': True},
+        {'from': 'synthetic_f1', 'to': 'synthetic_f2', 'meters': 0, 'vertical': True},
+        {'from': 'synthetic_f2', 'to': 'synthetic_room', 'meters': 10},
+    ]}
+    legs = Router(graph, []).route('synthetic_b1', 'synthetic_room')['legs']
+    assert [leg['floor'] for leg in legs] == [-1, 2]
+    assert legs[0]['exit'] == {'mode': 'elevator', 'to_floor': 2}
 
 
 def test_cost_preferred_and_reverse_elevator(router):
@@ -125,7 +171,8 @@ def test_route_errors_and_same_spot(backend):
     assert client.get('/route', params={'from': 'test_entry', 'to': 'TEST',
                                        'heading': 'test_room'}).status_code == 422
     same = client.get('/route', params={'from': 'test_entry', 'to': 'test_entry'}).json()
-    assert same == {'steps': [], 'total_meters': 0.0, 'est_seconds': 0}
+    assert same == {'steps': [], 'total_meters': 0.0, 'est_seconds': 0, 'legs': [
+        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]}
 
 
 def test_correction_logging_replay_and_rollback(backend):
@@ -251,6 +298,36 @@ def test_group_straight_segments_and_heading():
                                'meters': 20, 'node': 'synthetic_c'}]
     reverse = routes.route('synthetic_b', 'synthetic_a', heading='synthetic_c')
     assert reverse['steps'][0]['instruction'].startswith('Turn around')
+
+
+def test_turn_wording_shallow_bends_and_doors():
+    graph = {'nodes': [
+        {'id': 'synthetic_a', 'floor': 1, 'x': 0, 'y': 0, 'label': 'A'},
+        {'id': 'synthetic_b', 'floor': 1, 'x': 10, 'y': 0, 'label': 'B'},
+        # 35 degrees off the corridor line: a bend, not a turn.
+        {'id': 'synthetic_c', 'floor': 1, 'x': 20, 'y': 7, 'label': 'C'},
+        {'id': 'synthetic_d', 'floor': 1, 'x': 20, 'y': 17, 'label': 'D'},
+        # A door just beside the corridor.
+        {'id': 'synthetic_door', 'floor': 1, 'x': 14, 'y': 3, 'label': 'Door', 'type': 'room'},
+        {'id': 'synthetic_far', 'floor': 1, 'x': 22, 'y': -2, 'label': 'Far'},
+    ], 'edges': [
+        {'from': 'synthetic_a', 'to': 'synthetic_b', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_c', 'meters': 12},
+        {'from': 'synthetic_c', 'to': 'synthetic_d', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_door', 'meters': 5},
+        {'from': 'synthetic_door', 'to': 'synthetic_far', 'meters': 9},
+    ]}
+    routes = Router(graph, [])
+    bend = routes.route('synthetic_a', 'synthetic_c')
+    assert [s['instruction'] for s in bend['steps']] == ['Walk toward C']
+    turn = routes.route('synthetic_a', 'synthetic_d')
+    assert turn['steps'][-1]['instruction'] == 'Turn right and walk toward D'
+    door = routes.route('synthetic_a', 'synthetic_door')
+    assert door['steps'] == [{'instruction': 'Walk toward Door, on your right',
+                              'meters': 15, 'node': 'synthetic_door'}]
+    # Passing through a door node never reads as a turn.
+    through = routes.route('synthetic_a', 'synthetic_far')
+    assert [s['instruction'] for s in through['steps']] == ['Walk toward Far']
 
 
 def test_one_way_edge():

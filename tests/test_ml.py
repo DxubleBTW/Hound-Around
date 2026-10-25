@@ -97,7 +97,7 @@ def test_locate_contract_shape():
     backend = build(index)
     result = backend.locate(solid(red))
     assert set(result) == {'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'vector'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'vector'}
     assert result['spot'] == 'F1_a'
     assert result['floor'] == 1
     vector = np.asarray(result['vector'], dtype=np.float32)
@@ -287,7 +287,7 @@ def test_wrong_floor_lookalike_is_corrected_by_ocr_floor():
     assert backend._floor[result['spot']] == result['floor']  # API invariant
     assert 0.0 <= result['confidence'] <= 1.0
     assert set(result) == {'spot', 'floor', 'heading', 'confidence', 'top3',
-                           'ocr_room', 'ocr_floor', 'vector'}
+                           'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'vector'}
 
 
 def test_ocr_room_resolved_via_rooms_json_sets_floor_without_numeral():
@@ -390,17 +390,21 @@ def test_build_index_contract_format(tmp_path):
     rows.append('bad.jpg,v3,0.0,F1_a,card,true,10,false,reject_blurry,')
     (tmp_path / 'labels.csv').write_text('\n'.join(rows) + '\n')
 
-    from ml.build_index import build_index, CAP_PER_SPOT
-    out_path, counts = build_index(tmp_path, embed_fn=FakeEmbedder())
+    from ml.build_index import build_index
+    from ml.embedder import INDEX_VIEWS
+    out_path, counts = build_index(tmp_path, embed_fn=FakeEmbedder(), cap=60)
 
     assert out_path == tmp_path / 'index.npz'
     data = np.load(out_path, allow_pickle=False)
     assert data['vecs'].dtype == np.float16
     assert data['vecs'].shape[1] == DIM
     assert set(data['source'].tolist()) == {'video'}
-    assert counts['F1_a'] == CAP_PER_SPOT  # capped at ~60
+    assert counts['F1_a'] == 60  # capped
     assert counts['F1_b'] == 5 and counts['F2_c'] == 5
-    assert data['vecs'].shape[0] == CAP_PER_SPOT + 10
+    # every frame is stored as whole + left + right crop, all under its own label
+    assert len(data['labels']) == (60 + 5 + 5) * len(INDEX_VIEWS)
+    assert data['labels'].tolist().count('F1_b') == 5 * len(INDEX_VIEWS)
+    assert data['vecs'].shape[0] == len(data['labels'])
     # L2-normalized rows.
     norms = np.linalg.norm(data['vecs'].astype(np.float32), axis=1)
     assert np.allclose(norms, 1.0, atol=1e-2)
@@ -453,7 +457,7 @@ def test_create_app_with_backend(tmp_path, monkeypatch):
         body = response.json()
         # API strips the internal vector and diagnostics.
         assert set(body) == {'photo_id', 'spot', 'floor', 'heading', 'confidence',
-                             'top3', 'ocr_room', 'ocr_floor', 'ms'}
+                             'top3', 'ocr_room', 'ocr_floor', 'p_correct', 'tier', 'ms'}
         assert body['spot'] == 'F1_a'
         assert body['floor'] == 1
 
@@ -547,6 +551,27 @@ def test_build_index_reads_pipeline_dataset_folders(tmp_path):
     assert counts == {'F1_a': 3}
 
 
+def test_build_index_caps_360_views_separately_from_phone_frames(tmp_path):
+    # 360 crops must not crowd phone frames out of a spot's cap; they get their own budget.
+    (tmp_path / 'graph.json').write_text(json.dumps(synthetic_graph()))
+    header = 'file,video,t_sec,label,label_source,in_graph,sharpness,dup_of_prev,status'
+    for ds, video, n in (('dataset', 'v1', 4), ('dataset_360', 'X360_001', 6)):
+        _ensure(tmp_path / ds / 'train' / 'F1_a')
+        lines = [header]
+        for i in range(n):
+            name = f'{ds}_{i}.jpg'
+            solid((255, 0, 0)).save(tmp_path / ds / 'train' / 'F1_a' / name)
+            lines.append(f'{name},{video},{i}.0,F1_a,voice,true,1800,false,keep')
+        (tmp_path / ds / 'labels.csv').write_text('\n'.join(lines) + '\n')
+    import ml.build_index as B
+    B.CAP_360_PER_SPOT, old = 2, B.CAP_360_PER_SPOT
+    try:
+        _, counts = B.build_index(tmp_path, embed_fn=FakeEmbedder(), cap=3)
+    finally:
+        B.CAP_360_PER_SPOT = old
+    assert counts == {'F1_a': 3 + 2}
+
+
 def test_app_reports_unready_when_index_missing(tmp_path, monkeypatch):
     # N07 end to end: no index -> /health 503 and /locate 503, never a guess.
     import sys
@@ -566,3 +591,109 @@ def test_app_reports_unready_when_index_missing(tmp_path, monkeypatch):
         assert client.get('/health').status_code == 503
         response = client.post('/locate', files={'image': ('q.jpg', _jpeg((255, 0, 0)), 'image/jpeg')})
         assert response.status_code == 503
+
+
+def test_letterbox_keeps_the_whole_image_and_pads_to_a_square():
+    # No center crop: a landscape frame keeps its full width, padding fills the rest.
+    from ml.embedder import PAD_RGB, SIDE, letterbox
+    image = Image.new('RGB', (1920, 1080), (255, 0, 0))
+    boxed = letterbox(image)
+    assert boxed.size == (SIDE, SIDE)
+    assert boxed.getpixel((0, SIDE // 2)) == (255, 0, 0)  # left edge is image, not cut away
+    assert boxed.getpixel((SIDE // 2, 0)) == PAD_RGB  # top is padding
+
+
+def test_index_views_are_whole_frame_plus_overlapping_side_crops():
+    from ml.embedder import index_views
+    views = index_views(Image.new('RGB', (1000, 500)))
+    assert [v.size for v in views] == [(1000, 500), (600, 500), (600, 500)]
+
+
+# --- calibrated tiers and the second photo -----------------------------------
+
+def test_calibrated_tiers():
+    from ml import calibration
+    assert calibration.tier(0.9, span=False) == 'auto'
+    # Sure but the top 3 disagree on the floor: confirm, don't auto-pick.
+    assert calibration.tier(0.9, span=True) == 'picker'
+    assert calibration.tier(0.6, span=False) == 'picker'
+    assert calibration.tier(0.3, span=False) == 'second'
+    base = {'confidence': 0.5, 'share': 0.5, 'top_sim': 0.8, 'margin': 0.05, 'span': 0.0}
+    assert calibration.p_correct({**base, 'margin': 0.2}) > calibration.p_correct(base)
+    assert calibration.p_correct({**base, 'span': 1.0}) < calibration.p_correct(base)
+
+
+def test_locate_reports_p_correct_and_tier():
+    red, green = (255, 0, 0), (0, 128, 0)
+    index = make_index([(red, 'F1_a', 'video')] * 10 + [(green, 'F2_c', 'video')])
+    result = build(index).locate(solid(red))
+    assert 0 <= result['p_correct'] <= 1
+    assert result['tier'] in ('auto', 'picker', 'second')
+
+
+def test_second_photo_adds_both_votes():
+    red, green = (255, 0, 0), (0, 128, 0)
+    # The first photo splits between two floors; the second photo, facing the
+    # other way, is clearly F2_c.
+    index = make_index([(red, 'F1_a', 'video')] * 6 + [(red, 'F2_c', 'video')] * 4
+                       + [(green, 'F2_c', 'video')] * 10)
+    backend = build(index)
+    single = backend.locate(solid(red))
+    assert single['spot'] == 'F1_a'
+    fused = backend.locate(solid(red), previous=COLOR_VEC[green])
+    assert fused['spot'] == 'F2_c' and fused['floor'] == 2
+    assert fused['top3'] == [{'spot': 'F2_c', 'votes': 14}, {'spot': 'F1_a', 'votes': 6}]
+    # After two photos the user confirms on the fused top 3; never a third photo.
+    assert fused['tier'] == 'picker' and fused['p_correct'] is None
+    assert 0 <= fused['confidence'] <= 1
+
+
+# --- per-row heading: the photo's facing, not a per-spot guess ---------------
+
+def test_heading_is_majority_of_matched_rows():
+    red, green = (255, 0, 0), (0, 128, 0)
+    vecs = np.stack([COLOR_VEC[red]] * 6 + [COLOR_VEC[green]] * 4)
+    labels = ['F1_a'] * 6 + ['F1_b'] * 4
+    # F1_a's frames mostly face F1_b; one faces a non-neighbor (ignored).
+    heading = ['F1_b'] * 4 + ['F2_c', ''] + ['F1_a'] * 4
+    index = VectorIndex(vecs=vecs, labels=labels, source=['video'] * 10, heading=heading)
+    result = build(index).locate(solid(red))
+    assert result['spot'] == 'F1_a' and result['heading'] == 'F1_b'
+
+
+def test_heading_needs_agreement_from_rows():
+    red = (255, 0, 0)
+    # Only one matched row says which way it faces: too little to claim.
+    heading = ['F1_b'] + [''] * 9
+    index = VectorIndex(vecs=np.stack([COLOR_VEC[red]] * 10), labels=['F1_a'] * 10,
+                        source=['video'] * 10, heading=heading)
+    assert build(index).locate(solid(red))['heading'] is None
+
+
+def test_index_heading_round_trip_and_old_files(tmp_path):
+    index = make_index([((255, 0, 0), 'F1_a', 'video')] * 2)
+    index.heading = ['F1_b', '']
+    index.save(tmp_path / 'i.npz')
+    assert VectorIndex.load(tmp_path / 'i.npz').heading == ['F1_b', '']
+    # Corrections carry no heading.
+    assert index.with_appended(COLOR_VEC[(255, 0, 0)], 'F1_a', 'correction').heading == ['F1_b', '', '']
+    old = tmp_path / 'old.npz'
+    np.savez(old, vecs=index.vecs.astype(np.float16), labels=np.asarray(['F1_a'] * 2), source=np.asarray(['video'] * 2))
+    assert VectorIndex.load(old).heading == ['', '']
+
+
+def test_add_headings_matches_rows_without_reembedding(tmp_path):
+    test_build_index_contract_format(tmp_path)
+    from ml.build_index import add_headings
+    from ml.embedder import INDEX_VIEWS
+    data = dict(np.load(tmp_path / 'index.npz'))
+    data.pop('heading')
+    np.savez(tmp_path / 'index.npz', **data)
+    add_headings(tmp_path, cap=60)
+    out = np.load(tmp_path / 'index.npz')
+    assert (out['vecs'] == data['vecs']).all()
+    assert list(out['heading'][:len(INDEX_VIEWS)]) == ['F1_b'] * len(INDEX_VIEWS)
+    assert set(out['heading'][out['labels'] != 'F1_a']) == {''}
+    # A different cap reorders the rows: refuse rather than mislabel.
+    with pytest.raises(ValueError):
+        add_headings(tmp_path, cap=10)

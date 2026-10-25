@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame Review</title>
+<style>
+  :root { --bg:#111; --panel:#1b1b1b; --line:#333; --text:#eee; --muted:#999; --accent:#cc0000;
+          --keep:#2e9e5b; --drop:#b33; --blur:#c58a1b; --review:#4a7fd4; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui, sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--panel); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; }
+  header h1 { font-size:16px; margin:0; }
+  label.chip { display:inline-flex; gap:4px; align-items:center; padding:2px 8px; border:1px solid var(--line);
+               border-radius:12px; cursor:pointer; user-select:none; }
+  input, select, button { font:inherit; color:var(--text); background:#222; border:1px solid var(--line);
+                          border-radius:6px; padding:4px 8px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); }
+  .muted { color:var(--muted); }
+  main { padding:8px 16px 110px; }
+  h2 { font-size:13px; color:var(--muted); margin:18px 0 6px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:6px; }
+  .card { position:relative; border:3px solid transparent; border-radius:6px; overflow:hidden; background:#000;
+          cursor:pointer; }
+  .card img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; }
+  .card.sel { border-color:#fff; }
+  .card .stripe { position:absolute; top:0; left:0; right:0; height:4px; }
+  .s-keep .stripe { background:var(--keep); } .s-reject_blurry .stripe { background:var(--blur); }
+  .s-review_not_in_graph .stripe { background:var(--review); } .s-reject_review .stripe,
+  .s-reject_duplicate .stripe { background:var(--drop); }
+  .card .meta { padding:3px 5px; font-size:11px; background:var(--panel); }
+  .card .lab { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card .sug { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card .sug.disagree { color:#f0b429; }
+  .badge { position:absolute; top:8px; right:6px; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700; }
+  .badge.keep { background:var(--keep); } .badge.drop { background:var(--drop); }
+  footer { position:fixed; bottom:0; left:0; right:0; z-index:5; background:var(--panel); border-top:1px solid var(--line);
+           padding:10px 16px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  footer input { width:260px; }
+  kbd { border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:11px; color:var(--muted); }
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:10; display:none; flex-direction:column;
+           align-items:center; justify-content:center; padding:16px; }
+  #modal img { max-width:100%; max-height:80vh; }
+  #modal .info { margin-top:8px; text-align:center; }
+  #toast { position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:#333; padding:8px 14px;
+           border-radius:6px; display:none; z-index:20; }
+  /* Swipe mode: one frame at a time, arrows or drag to decide. */
+  #swipe { position:fixed; inset:0; background:var(--bg); z-index:12; display:none; flex-direction:column;
+           align-items:center; padding:12px 16px; gap:10px; }
+  #swipe .top { width:100%; max-width:960px; display:flex; gap:12px; align-items:center; }
+  #swipe .bar { flex:1; height:6px; background:#222; border-radius:3px; overflow:hidden; }
+  #swipe .bar i { display:block; height:100%; background:var(--keep); width:0; }
+  #swipe .stage { position:relative; width:100%; max-width:960px; flex:1; min-height:0; display:flex;
+                  align-items:center; justify-content:center; }
+  #swipe .card1 { position:relative; max-width:100%; max-height:100%; touch-action:none; cursor:grab;
+                  border-radius:10px; overflow:hidden; transition:transform .18s ease-out; }
+  #swipe .card1.drag { transition:none; cursor:grabbing; }
+  #swipe .card1 img { display:block; max-width:100%; max-height:calc(100vh - 330px); user-select:none; -webkit-user-drag:none; }
+  #swipe .stamp { position:absolute; top:16px; padding:4px 12px; border:3px solid; border-radius:6px; font-weight:800;
+                  font-size:22px; opacity:0; }
+  #swipe .stamp.keep { left:16px; color:var(--keep); transform:rotate(-12deg); }
+  #swipe .stamp.drop { right:16px; color:var(--drop); transform:rotate(12deg); }
+  #swipe .stamp.sug { left:50%; transform:translateX(-50%); color:var(--review); }
+  #swipe .info { text-align:center; max-width:960px; }
+  #swipe .info .lab { font-size:20px; font-weight:700; }
+  #swipe .film { display:flex; gap:4px; }
+  #swipe .film img { height:54px; border-radius:4px; opacity:.6; }
+  #swipe .film img.cur { opacity:1; outline:2px solid #fff; }
+  #swipe .acts { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+  #swipe .acts button { padding:10px 14px; font-size:15px; min-width:120px; }
+  #swipe .acts .drop { background:var(--drop); border-color:var(--drop); }
+  #swipe .acts .keep { background:var(--keep); border-color:var(--keep); }
+  #swipe .acts .sug { background:var(--review); border-color:var(--review); }
+  #swipe .acts button:disabled { opacity:.35; cursor:not-allowed; }
+  #swipe .unsure { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; align-items:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Frame review</h1>
+  <select id="dataset"><option value="">All datasets</option></select>
+  <span id="statuses"></span>
+  <input id="search" placeholder="Label, video or file" size="18">
+  <label class="chip"><input type="checkbox" id="undecided"> Undecided</label>
+  <label class="chip" title="Top suggestion differs from the frame's label"><input type="checkbox" id="disagree"> Suggestion disagrees</label>
+  <span id="count" class="muted"></span>
+  <span id="embed" class="muted"></span>
+  <span style="flex:1"></span>
+  <button id="swipeOpen" title="Decide one frame at a time with the arrow keys">Swipe mode <kbd>W</kbd></button>
+  <button id="apply" class="primary">Apply decisions</button>
+</header>
+<main id="main"></main>
+<footer>
+  <strong id="selcount">0 selected</strong>
+  <button data-act="keep">Keep as labeled <kbd>K</kbd></button>
+  <button data-act="suggest">Use suggestion <kbd>S</kbd></button>
+  <input id="relabel" list="nodes" placeholder="Relabel to node… (R)">
+  <button data-act="relabel">Relabel <kbd>Enter</kbd></button>
+  <button data-act="drop">Drop <kbd>D</kbd></button>
+  <button data-act="clear">Clear <kbd>U</kbd></button>
+  <span class="muted">Click, Shift+click range, Ctrl+A all shown, Space preview, Esc deselect</span>
+  <datalist id="nodes"></datalist>
+</footer>
+<div id="modal"><img alt=""><div class="info"></div></div>
+<div id="swipe">
+  <div class="top">
+    <strong id="swPos"></strong>
+    <div class="bar"><i id="swBar"></i></div>
+    <span id="swStats" class="muted"></span>
+    <button id="swClose">Done <kbd>Esc</kbd></button>
+  </div>
+  <div class="stage">
+    <div class="card1" id="swCard"><img alt="" id="swImg">
+      <span class="stamp keep">KEEP</span><span class="stamp drop">DROP</span><span class="stamp sug">SUGGESTION</span></div>
+  </div>
+  <div class="film" id="swFilm" title="Neighboring frames from the same video"></div>
+  <div class="info"><div class="lab" id="swLab"></div><div class="muted" id="swMeta"></div></div>
+  <div class="acts">
+    <button class="drop" id="swDrop">← Drop</button>
+    <button class="sug" id="swSug">↑ Use suggestion</button>
+    <button id="swSkip">↓ Unsure, skip</button>
+    <button class="keep" id="swKeep">Keep →</button>
+  </div>
+  <div class="unsure">
+    <span class="muted">Not sure?</span>
+    <span id="swPicks"></span>
+    <input id="swRelabel" list="nodes" placeholder="Relabel to node… (R)" size="22">
+    <button id="swUndo">Undo <kbd>Z</kbd></button>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const STATUS_ORDER = ['review_not_in_graph', 'reject_blurry', 'keep', 'reject_duplicate', 'reject_review', 'exclude_restricted'];
+const DEFAULT_ON = new Set(['review_not_in_graph', 'reject_blurry']);
+const BATCH = 300;
+let state = { frames: [], nodes: {} }, shown = [], selected = new Set(), anchor = null, rendered = 0, preview = -1;
+const cards = new Map();
+const $ = (id) => document.getElementById(id);
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.style.display = 'none'), 3000);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+const currentLabel = (f) => (f.decision && f.decision.decision === 'keep' ? f.decision.label : f.label);
+const topSuggestion = (f) => (f.suggest[0] ? f.suggest[0].spot : null);
+
+function buildFilters() {
+  const datasets = [...new Set(state.frames.map((f) => f.dataset))];
+  $('dataset').innerHTML = '<option value="">All datasets</option>' + datasets.map((d) => `<option>${d}</option>`).join('');
+  const counts = {};
+  state.frames.forEach((f) => (counts[f.status] = (counts[f.status] || 0) + 1));
+  const statuses = STATUS_ORDER.filter((s) => counts[s]).concat(Object.keys(counts).filter((s) => !STATUS_ORDER.includes(s)));
+  const prev = new Set([...document.querySelectorAll('#statuses input:checked')].map((i) => i.value));
+  $('statuses').innerHTML = statuses.map((s) => `<label class="chip"><input type="checkbox" value="${s}"
+    ${(prev.size ? prev.has(s) : DEFAULT_ON.has(s)) ? 'checked' : ''}> ${s.replace(/_/g, ' ')} (${counts[s]})</label>`).join(' ');
+  $('statuses').querySelectorAll('input').forEach((i) => i.addEventListener('change', render));
+  $('nodes').innerHTML = Object.entries(state.nodes).sort().map(([id, label]) => `<option value="${id}">${label}</option>`).join('');
+}
+
+function filtered() {
+  const ds = $('dataset').value, q = $('search').value.trim().toLowerCase();
+  const on = new Set([...document.querySelectorAll('#statuses input:checked')].map((i) => i.value));
+  return state.frames.filter((f) => on.has(f.status) && (!ds || f.dataset === ds)
+    && (!q || (currentLabel(f) + ' ' + f.video + ' ' + f.file).toLowerCase().includes(q))
+    && (!$('undecided').checked || !f.decision)
+    && (!$('disagree').checked || (topSuggestion(f) && topSuggestion(f) !== currentLabel(f))));
+}
+
+function cardHtml(f) {
+  const d = f.decision;
+  const sug = f.suggest.map((s) => `${s.spot} ${s.votes}`).join(' · ');
+  const disagree = topSuggestion(f) && topSuggestion(f) !== currentLabel(f);
+  return `<div class="stripe"></div><img loading="lazy" src="${f.url}" alt="">
+    ${d ? `<span class="badge ${d.decision}">${d.decision === 'keep' ? 'KEEP' : 'DROP'}</span>` : ''}
+    <div class="meta"><div class="lab" title="${currentLabel(f)}">${currentLabel(f)} <span class="muted">${f.t.toFixed(1)}s</span></div>
+    <div class="sug ${disagree ? 'disagree' : ''}" title="Top-10 vote from other videos">${sug || '&nbsp;'}</div></div>`;
+}
+
+function updateCard(f) {
+  const el = cards.get(f.id);
+  if (!el) return;
+  el.className = `card s-${f.status}${selected.has(f.id) ? ' sel' : ''}`;
+  el.innerHTML = cardHtml(f);
+}
+
+function render() {
+  shown = filtered();
+  cards.clear(); rendered = 0;
+  $('main').innerHTML = '';
+  const undecided = shown.filter((f) => !f.decision).length;
+  $('count').textContent = `${shown.length} shown, ${undecided} undecided`;
+  renderMore();
+}
+
+function renderMore() {
+  const main = $('main');
+  let grid = main.lastElementChild && main.lastElementChild.classList.contains('grid') ? main.lastElementChild : null;
+  let group = grid ? grid.dataset.group : null;
+  const end = Math.min(rendered + BATCH, shown.length);
+  for (let i = rendered; i < end; i++) {
+    const f = shown[i], g = f.dataset + ' / ' + f.video;
+    if (g !== group) {
+      group = g;
+      main.insertAdjacentHTML('beforeend', `<h2>${g}</h2>`);
+      grid = document.createElement('div'); grid.className = 'grid'; grid.dataset.group = g; main.appendChild(grid);
+    }
+    const el = document.createElement('div');
+    el.dataset.index = i;
+    cards.set(f.id, el);
+    grid.appendChild(el);
+    updateCard(f);
+  }
+  rendered = end;
+  document.getElementById('sentinel')?.remove();
+  if (rendered < shown.length) {
+    main.insertAdjacentHTML('beforeend', '<div id="sentinel" class="muted" style="padding:20px">Loading more…</div>');
+    observer.observe($('sentinel'));
+  }
+}
+const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && renderMore(), { rootMargin: '800px' });
+
+function setSelection(ids) {
+  const before = selected; selected = new Set(ids);
+  [...before, ...selected].forEach((id) => { const el = cards.get(id); if (el) el.classList.toggle('sel', selected.has(id)); });
+  $('selcount').textContent = `${selected.size} selected`;
+}
+
+$('main').addEventListener('click', (e) => {
+  const el = e.target.closest('.card'); if (!el) return;
+  const i = +el.dataset.index, id = shown[i].id;
+  if (e.shiftKey && anchor !== null) {
+    const [a, b] = [Math.min(anchor, i), Math.max(anchor, i)];
+    setSelection([...selected, ...shown.slice(a, b + 1).map((f) => f.id)]);
+  } else {
+    const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelection(next); anchor = i;
+  }
+});
+$('main').addEventListener('dblclick', (e) => { const el = e.target.closest('.card'); if (el) openPreview(+el.dataset.index); });
+
+async function act(kind) {
+  // In the preview, act on the frame being viewed.
+  const ids = preview >= 0 ? [shown[preview].id] : [...selected];
+  if (!ids.length) return toast('Select frames first');
+  const byId = new Map(state.frames.map((f) => [f.id, f]));
+  const groups = new Map(); // label -> ids, one request per label
+  const add = (label, id) => groups.set(label, (groups.get(label) || []).concat(id));
+  for (const id of ids) {
+    const f = byId.get(id);
+    if (kind === 'keep') {
+      if (!(currentLabel(f) in state.nodes)) return toast(`${currentLabel(f)} is not a graph node: relabel it instead`);
+      add(currentLabel(f), id);
+    } else if (kind === 'suggest') {
+      if (!topSuggestion(f)) return toast('No suggestion yet for some selected frames');
+      add(topSuggestion(f), id);
+    } else if (kind === 'relabel') {
+      const label = $('relabel').value.trim();
+      if (!(label in state.nodes)) return toast(`${label || 'Empty label'} is not a B1/F1/F2 node`);
+      add(label, id);
+    } else add(null, id);
+  }
+  const decision = kind === 'drop' ? 'drop' : kind === 'clear' ? 'clear' : 'keep';
+  try {
+    for (const [label, group] of groups) await api('/api/decide', { ids: group, decision, label });
+  } catch (err) { return toast(err.message); }
+  const now = new Date().toISOString();
+  for (const [label, group] of groups) for (const id of group) {
+    const f = byId.get(id);
+    f.decision = decision === 'clear' ? null : { decision, label: label || '', decided_at: now };
+    updateCard(f);
+  }
+  toast(`${ids.length} frame${ids.length > 1 ? 's' : ''}: ${kind}`);
+  if (preview >= 0) openPreview(Math.min(preview + 1, shown.length - 1));
+}
+document.querySelectorAll('footer button[data-act]').forEach((b) => b.addEventListener('click', () => act(b.dataset.act)));
+$('relabel').addEventListener('keydown', (e) => { if (e.key === 'Enter') { act('relabel'); e.stopPropagation(); } });
+
+function openPreview(i) {
+  if (i < 0 || i >= shown.length) return;
+  preview = i;
+  const f = shown[i], m = $('modal');
+  m.style.display = 'flex';
+  m.querySelector('img').src = f.url;
+  const d = f.decision ? ` · <b>${f.decision.decision.toUpperCase()} ${f.decision.label}</b>` : '';
+  m.querySelector('.info').innerHTML = `<b>${currentLabel(f)}</b> · ${f.status.replace(/_/g, ' ')} · ${f.dataset}/${f.video} @ ${f.t.toFixed(1)}s
+    · sharpness ${f.sharpness}${d}<br><span class="muted">Suggests: ${f.suggest.map((s) => `${s.spot} (${s.votes})`).join(', ') || 'none yet'}
+    · ←/→ move · K S D U act · Esc close</span>`;
+}
+function closePreview() { preview = -1; $('modal').style.display = 'none'; }
+$('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closePreview(); });
+
+// Swipe mode: one frame at a time over the undecided frames the current filters show.
+// → keep as labeled, ← drop, ↑ top suggestion, ↓ skip (stays undecided), 1-3 pick a suggestion, R relabel, Z undo.
+const sw = { on: false, queue: [], i: 0, undo: [], skipped: 0, decided: 0, drag: null, busy: false };
+const nodeName = (id) => (id in state.nodes ? `${id} · ${state.nodes[id]}` : `${id} (not a graph node)`);
+
+function openSwipe() {
+  const queue = filtered().filter((f) => !f.decision);
+  if (!queue.length) return toast('Nothing undecided in the current filters');
+  Object.assign(sw, { on: true, queue, i: 0, undo: [], skipped: 0, decided: 0, busy: false });
+  closePreview(); $('swipe').style.display = 'flex'; showSwipe();
+}
+function closeSwipe() { sw.on = false; $('swipe').style.display = 'none'; render(); }
+
+function setCard(dx, dy, drag) {
+  const card = $('swCard');
+  card.classList.toggle('drag', drag);
+  card.style.transform = dx || dy ? `translate(${dx}px, ${dy}px) rotate(${dx / 25}deg)` : '';
+  card.querySelector('.keep').style.opacity = Math.max(0, Math.min(1, dx / 120));
+  card.querySelector('.drop').style.opacity = Math.max(0, Math.min(1, -dx / 120));
+  card.querySelector('.sug').style.opacity = Math.max(0, Math.min(1, -dy / 120));
+}
+
+function showSwipe() {
+  if (sw.i >= sw.queue.length) {
+    toast(`Done: ${sw.decided} decided, ${sw.skipped} skipped. Apply decisions when ready.`);
+    return closeSwipe();
+  }
+  const f = sw.queue[sw.i], label = currentLabel(f), top = topSuggestion(f);
+  $('swImg').src = f.url;
+  setCard(0, 0, false);
+  $('swPos').textContent = `${sw.i + 1} / ${sw.queue.length}`;
+  $('swBar').style.width = `${(100 * sw.i) / sw.queue.length}%`;
+  $('swStats').textContent = `${sw.decided} decided · ${sw.skipped} skipped`;
+  $('swLab').textContent = nodeName(label);
+  $('swMeta').textContent = `${f.status.replace(/_/g, ' ')} · ${f.dataset}/${f.video} @ ${f.t.toFixed(1)}s · sharpness ${f.sharpness}`;
+  const canKeep = label in state.nodes;
+  $('swKeep').disabled = !canKeep;
+  $('swKeep').textContent = canKeep ? `Keep as ${label} →` : 'Keep → (label not in graph)';
+  $('swSug').disabled = !top;
+  $('swSug').textContent = top ? `↑ Use ${top}` : '↑ No suggestion yet';
+  $('swPicks').innerHTML = f.suggest.map((s, n) =>
+    `<button data-pick="${n}" title="${state.nodes[s.spot] || ''}">${n + 1}. ${s.spot} <span class="muted">${s.votes}/10</span></button>`).join(' ');
+  // Neighboring frames of the same video for context (state.frames is sorted by dataset, video, time).
+  const at = state.frames.indexOf(f);
+  $('swFilm').innerHTML = state.frames.slice(Math.max(0, at - 2), at + 3)
+    .filter((g) => g.dataset === f.dataset && g.video === f.video)
+    .map((g) => `<img src="${g.url}" class="${g === f ? 'cur' : ''}" alt="">`).join('');
+  sw.queue.slice(sw.i + 1, sw.i + 4).forEach((g) => (new Image().src = g.url)); // preload
+}
+
+function fly(dir) {
+  const w = window.innerWidth;
+  const [dx, dy] = { right: [w, 0], left: [-w, 0], up: [0, -window.innerHeight], down: [0, 0] }[dir];
+  setCard(dx, dy, false);
+  setTimeout(() => { sw.i++; sw.busy = false; showSwipe(); }, dir === 'down' ? 0 : 170);
+}
+
+async function swipeDecide(decision, label, dir) {
+  const f = sw.queue[sw.i];
+  if (!f || sw.busy) return;
+  if (decision === 'keep' && !(label in state.nodes)) { setCard(0, 0, false); return toast(`${label || 'Empty label'} is not a B1/F1/F2 node`); }
+  sw.busy = true; // until the card has flown off, so a fast double press can't decide one frame twice
+  try {
+    await api('/api/decide', { ids: [f.id], decision, label: decision === 'keep' ? label : null });
+  } catch (err) { sw.busy = false; setCard(0, 0, false); return toast(err.message); }
+  sw.undo.push({ i: sw.i, f, prev: f.decision });
+  f.decision = { decision, label: decision === 'keep' ? label : '', decided_at: new Date().toISOString() };
+  sw.decided++;
+  fly(dir);
+}
+
+function swipeSkip() {
+  if (!sw.queue[sw.i] || sw.busy) return;
+  sw.busy = true;
+  sw.undo.push({ i: sw.i, skipped: true }); sw.skipped++;
+  fly('down');
+}
+
+async function swipeUndo() {
+  if (sw.busy) return;
+  const last = sw.undo.pop();
+  if (!last) return toast('Nothing to undo');
+  if (last.skipped) sw.skipped--;
+  else {
+    const { f, prev } = last;
+    try {
+      await api('/api/decide', prev ? { ids: [f.id], decision: prev.decision, label: prev.label || null }
+                                    : { ids: [f.id], decision: 'clear' });
+    } catch (err) { sw.undo.push(last); return toast(err.message); }
+    f.decision = prev; sw.decided--;
+  }
+  sw.i = last.i; showSwipe();
+}
+
+const swKeep = () => { const f = sw.queue[sw.i]; if (f) swipeDecide('keep', currentLabel(f), 'right'); };
+const swDrop = () => swipeDecide('drop', null, 'left');
+const swSug = () => { const f = sw.queue[sw.i]; if (!f) return; const t = topSuggestion(f);
+  if (!t) { setCard(0, 0, false); return toast('No suggestion yet'); } swipeDecide('keep', t, 'up'); };
+const swPick = (n) => { const s = sw.queue[sw.i]?.suggest[n]; if (s) swipeDecide('keep', s.spot, 'right'); };
+
+$('swipeOpen').addEventListener('click', openSwipe);
+$('swClose').addEventListener('click', closeSwipe);
+$('swKeep').addEventListener('click', swKeep);
+$('swDrop').addEventListener('click', swDrop);
+$('swSug').addEventListener('click', swSug);
+$('swSkip').addEventListener('click', swipeSkip);
+$('swUndo').addEventListener('click', swipeUndo);
+$('swPicks').addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) swPick(+b.dataset.pick); });
+$('swRelabel').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.stopPropagation();
+  const label = e.target.value.trim();
+  if (label in state.nodes) { e.target.value = ''; e.target.blur(); }
+  swipeDecide('keep', label, 'right');
+});
+
+// Drag the card like a dating app: right keep, left drop, up suggestion.
+$('swCard').addEventListener('pointerdown', (e) => {
+  sw.drag = { x: e.clientX, y: e.clientY }; $('swCard').setPointerCapture(e.pointerId);
+});
+$('swCard').addEventListener('pointermove', (e) => {
+  if (sw.drag) setCard(e.clientX - sw.drag.x, Math.min(0, e.clientY - sw.drag.y), true);
+});
+$('swCard').addEventListener('pointerup', (e) => {
+  if (!sw.drag) return;
+  const dx = e.clientX - sw.drag.x, dy = e.clientY - sw.drag.y; sw.drag = null;
+  if (dx > 120) swKeep();
+  else if (dx < -120) swDrop();
+  else if (dy < -120) swSug();
+  else setCard(0, 0, false);
+});
+
+function swipeKey(e) {
+  const k = e.key.toLowerCase();
+  const act = { arrowright: swKeep, arrowleft: swDrop, arrowup: swSug, arrowdown: swipeSkip, ' ': swipeSkip,
+                z: swipeUndo, backspace: swipeUndo, escape: closeSwipe, '1': () => swPick(0), '2': () => swPick(1),
+                '3': () => swPick(2), r: () => $('swRelabel').focus() }[k];
+  if (!act || e.ctrlKey || e.metaKey || e.repeat) return;
+  e.preventDefault(); act();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (sw.on) return swipeKey(e);
+  const k = e.key.toLowerCase();
+  if (k === 'w' && !e.ctrlKey && !e.metaKey) return openSwipe();
+  if (k === 'escape') return preview >= 0 ? closePreview() : setSelection([]);
+  if (preview >= 0 && (k === 'arrowright' || k === 'arrowleft')) return openPreview(preview + (k === 'arrowright' ? 1 : -1));
+  if (k === ' ') { e.preventDefault(); return preview >= 0 ? closePreview() : openPreview(anchor ?? 0); }
+  if (k === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return setSelection(shown.map((f) => f.id)); }
+  if (k === 'r') { e.preventDefault(); closePreview(); return $('relabel').focus(); }
+  const map = { k: 'keep', s: 'suggest', d: 'drop', u: 'clear' };
+  if (map[k] && !e.ctrlKey && !e.metaKey) act(map[k]);
+});
+
+$('apply').addEventListener('click', async () => {
+  const pending = state.frames.filter((f) => f.decision).length;
+  if (!pending) return toast('No decisions to apply');
+  if (!confirm(`Apply ${pending} decisions? Frames move into train/<node>/ or reject_review/ and labels.csv is rewritten.`)) return;
+  try {
+    const res = await api('/api/apply', {});
+    const total = {};
+    Object.values(res.applied).forEach((c) => Object.entries(c).forEach(([k, v]) => (total[k] = (total[k] || 0) + v)));
+    toast('Applied: ' + Object.entries(total).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ') + '. Rebuild the index next.');
+    await load();
+  } catch (err) { toast(err.message); }
+});
+
+['dataset', 'search', 'undecided', 'disagree'].forEach((id) => $(id).addEventListener('input', render));
+
+async function load() {
+  state = await api('/api/state');
+  buildFilters(); setSelection([]); render();
+  pollEmbedding();
+}
+
+async function pollEmbedding() {
+  const e = state.embedding;
+  if (!e) return ($('embed').textContent = 'Suggestions off');
+  if (e.error) return ($('embed').textContent = 'Suggestions failed: ' + e.error);
+  if (e.total && e.done < e.total) {
+    $('embed').textContent = `Embedding ${e.done}/${e.total}…`;
+    clearTimeout(pollEmbedding.timer);
+    pollEmbedding.timer = setTimeout(async () => {
+      const fresh = await api('/api/state');
+      const byId = new Map(fresh.frames.map((f) => [f.id, f]));
+      state.embedding = fresh.embedding;
+      state.frames.forEach((f) => { f.suggest = byId.get(f.id)?.suggest || []; updateCard(f); });
+      pollEmbedding();
+    }, 4000);
+  } else $('embed').textContent = 'Suggestions ready';
+}
+
+load().catch((err) => toast(err.message));
+</script>
+</body>
+</html>

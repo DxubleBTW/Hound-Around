@@ -4,6 +4,16 @@ import re
 
 import networkx as nx
 
+# Door nodes sit a little off the corridor line, so small bends are not turns.
+STRAIGHT_DEGREES = 45
+AROUND_DEGREES = 150
+# A destination door this far off the walking line is "on your left/right".
+SIDE_DEGREES = 15
+
+
+def is_door(node):
+    return node.get('type') == 'room'
+
 
 class Router:
     def __init__(self, graph, rooms):
@@ -95,8 +105,13 @@ class Router:
             else:
                 direction = 'Walk'
                 origin = self.nodes[a]
-                incoming = None
-                if previous is not None:
+                # A door passed mid-route bends the line but is not a turn; the
+                # next turn is measured from the node before the door.
+                passing_door = a != start and is_door(origin)
+                incoming, angle = None, None
+                if passing_door:
+                    direction = 'Continue'
+                elif previous is not None:
                     incoming = (origin['x'] - previous['x'], origin['y'] - previous['y'])
                 elif a == start and heading:
                     facing = self.nodes[heading]
@@ -109,11 +124,16 @@ class Router:
                         incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
                     ))
                     # Walk-sheet y increases downward.
-                    direction = ('Turn around and walk' if abs(angle) >= 150 else
-                                 'Turn right and walk' if angle > 30 else
-                                 'Turn left and walk' if angle < -30 else 'Continue')
+                    direction = ('Turn around and walk' if abs(angle) >= AROUND_DEGREES else
+                                 'Turn right and walk' if angle >= STRAIGHT_DEGREES else
+                                 'Turn left and walk' if angle <= -STRAIGHT_DEGREES else 'Continue')
+                    if b == destination and is_door(target) and SIDE_DEGREES <= abs(angle) < AROUND_DEGREES:
+                        # The door is beside the corridor: say which side, don't turn.
+                        direction = 'Continue'
+                        toward = f"{toward}, on your {'right' if angle > 0 else 'left'}"
                 instruction = f'{direction} toward {toward}'
-                previous = origin
+                if not passing_door:
+                    previous = origin
             if steps and not edge.get('vertical', False) and direction == 'Continue':
                 # Group straight segments into one human turn, unless the
                 # previous step was a floor transition.
@@ -127,4 +147,39 @@ class Router:
                 steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b})
             total += edge['meters']
         return {'steps': steps, 'total_meters': total,
-                'est_seconds': math.ceil(total / (0.9 if accessible else 1.2))}
+                'est_seconds': math.ceil(total / (0.9 if accessible else 1.2)),
+                'legs': self.legs(path, graph)}
+
+    def legs(self, path, graph):
+        """One drawable leg per floor. Points are normalized to each leg's own
+        bounding box, so building coordinates and other geometry never leave
+        the server: the client sees only the shape of its own path."""
+        legs, run = [], [path[0]]
+        for a, b in zip(path, path[1:]):
+            edge = graph[a][b]
+            if not edge.get('vertical', False):
+                run.append(b)
+                continue
+            exit = {'mode': 'stairs' if edge.get('stairs', False) else 'elevator',
+                    'to_floor': self.nodes[b]['floor']}
+            if len(run) == 1 and legs:
+                # The previous edge was vertical too: riding through a floor
+                # (LL -> 1 -> 2) is one move, not a one-point leg.
+                legs[-1]['exit'] = exit
+            else:
+                legs.append(self._leg(run, exit))
+            run = [b]
+        legs.append(self._leg(run, None))
+        return legs
+
+    def _leg(self, run, exit):
+        xs = [self.nodes[n]['x'] for n in run]
+        ys = [self.nodes[n]['y'] for n in run]
+        span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+        # Keep aspect: scale the longer side to 0.8, centre the shorter one.
+        ox = (1 - 0.8 * (max(xs) - min(xs)) / span) / 2
+        oy = (1 - 0.8 * (max(ys) - min(ys)) / span) / 2
+        points = [[round(ox + 0.8 * (x - min(xs)) / span, 3),
+                   round(oy + 0.8 * (y - min(ys)) / span, 3)] for x, y in zip(xs, ys)]
+        return {'floor': self.nodes[run[0]]['floor'], 'points': points,
+                'start': run[0], 'end': run[-1], 'exit': exit}

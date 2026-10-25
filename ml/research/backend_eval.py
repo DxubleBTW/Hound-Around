@@ -45,7 +45,9 @@ def meters_table(graph, labels):
     return D
 
 
-def evaluate(rows, V, graph, ocr, videos, make_backend):
+def evaluate(rows, V, graph, ocr, videos, make_backend, views=None):
+    """V: query vectors per frame. views: index matrices per frame (default [V]); each adds one row per frame."""
+    views = [V] if views is None else views
     D = meters_table(graph, {r["label"] for r in rows})
     stats = defaultdict(lambda: defaultdict(int))
     flips = defaultdict(lambda: [0, 0])
@@ -53,7 +55,8 @@ def evaluate(rows, V, graph, ocr, videos, make_backend):
     for held in videos:
         train = A.capped(rows, [i for i, r in enumerate(rows) if r["video"] != held])
         seen = {rows[i]["label"] for i in train}
-        index = VectorIndex(V[train], [rows[i]["label"] for i in train], ["video"] * len(train))
+        index = VectorIndex(np.concatenate([X[train] for X in views]), [rows[i]["label"] for i in train] * len(views),
+                            ["video"] * len(train) * len(views))
         backend = make_backend(index, graph, ocr)
         queries = [i for i in A.at_spot_idx(rows, held) if rows[i]["label"] in seen]
         by_t = {(rows[i]["label"], rows[i]["t"]): i for i, r in enumerate(rows) if r["video"] == held}
@@ -107,11 +110,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", type=Path, nargs="+", default=[Path("data/dataset")])
     ap.add_argument("--graph", type=Path, default=Path("data/graph.json"))
+    ap.add_argument("--prep", default="center", help="center (old) or pad (shipped since the matching upgrade)")
+    ap.add_argument("--views", action="store_true", help="index left/right crops too (ml.embedder.INDEX_VIEWS)")
+    ap.add_argument("--cap", type=int, default=A.CAP)
     args = ap.parse_args()
+    A.CAP = args.cap
     graph = json.loads(args.graph.read_text())
     nodes = {n["id"] for n in graph["nodes"]}
     rows = [r for d in args.dataset for r in load_frames(d) if r["label"] in nodes]
-    V = embed_cached("dinov2", [r["path"] for r in rows])
+    paths = [r["path"] for r in rows]
+    V = embed_cached("dinov2", paths, prep=args.prep)
+    views = [V] + ([embed_cached("dinov2", paths, crop=c, prep=args.prep) for c in ("left", "right")]
+                   if args.views else [])
     cache = json.loads(Path("data/cache/ocr_frames.json").read_text())
     ocr = [tuple(cache.get(frame_key(r), (None, None))) for r in rows]
     videos = sorted({r["video"] for r in rows})
@@ -119,7 +129,8 @@ def main():
     def make(index, graph, ocr):
         return Backend(index, graph, {}, embed_fn=lambda i: V[i], ocr_reader=lambda i: ocr[i])
 
-    print_table("ml.backend (main)", *evaluate(rows, V, graph, ocr, videos, make))
+    name = f"ml.backend prep={args.prep} views={len(views)} cap={args.cap}"
+    print_table(name, *evaluate(rows, V, graph, ocr, videos, make, views))
 
 
 if __name__ == "__main__":

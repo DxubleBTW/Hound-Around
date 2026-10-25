@@ -15,10 +15,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ml.embedder import DIM, normalize
+from ml.embedder import DIM, INDEX_VIEWS, normalize
 
-# A correction vote counts as this many video votes (design.md §3).
-CORRECTION_WEIGHT = 3
+# A correction vote counts as this many video votes (design.md §3): 3 frames'
+# worth, and every video frame is len(INDEX_VIEWS) rows. Scaling it keeps one
+# correction learning as often as before multi-view (83% next-frame flips,
+# 2.9% hijacks vs 3.7% before; ml/research/backend_eval.py).
+CORRECTION_WEIGHT = 3 * len(INDEX_VIEWS)
 
 
 class VectorIndex:
@@ -28,13 +31,16 @@ class VectorIndex:
     they are persisted as float16 to match the contract.
     """
 
-    def __init__(self, vecs=None, labels=None, source=None):
+    def __init__(self, vecs=None, labels=None, source=None, heading=None):
         if vecs is None:
             vecs = np.zeros((0, DIM), dtype=np.float32)
         self.vecs = np.asarray(vecs, dtype=np.float32).reshape(-1, DIM)
         self.labels = list(labels or [])
         self.source = list(source or [])
-        if not (len(self.labels) == len(self.source) == self.vecs.shape[0]):
+        # Node each row's frame faces ('' when unknown). Matched rows face the
+        # way the photo does, so their majority heading is the user's facing.
+        self.heading = list(heading) if heading is not None else [''] * len(self.labels)
+        if not (len(self.labels) == len(self.source) == len(self.heading) == self.vecs.shape[0]):
             raise ValueError('Index vecs/labels/source length mismatch')
 
     def __len__(self):
@@ -48,6 +54,7 @@ class VectorIndex:
             vecs=np.asarray(data['vecs'], dtype=np.float32),
             labels=[str(x) for x in data['labels']],
             source=[str(x) for x in data['source']],
+            heading=[str(x) for x in data['heading']] if 'heading' in data.files else None,
         )
 
     def save(self, path) -> None:
@@ -57,6 +64,8 @@ class VectorIndex:
             labels=np.asarray(self.labels, dtype=object).astype('U') if self.labels
             else np.zeros((0,), dtype='U1'),
             source=np.asarray(self.source, dtype=object).astype('U') if self.source
+            else np.zeros((0,), dtype='U1'),
+            heading=np.asarray(self.heading, dtype=object).astype('U') if self.heading
             else np.zeros((0,), dtype='U1'),
         )
 
@@ -68,15 +77,15 @@ class VectorIndex:
             raise ValueError(f'Correction vector must be {DIM}-d')
         vecs = np.vstack([self.vecs, vector[None, :]]).astype(np.float32)
         return VectorIndex(vecs=vecs, labels=self.labels + [label],
-                           source=self.source + [source])
+                           source=self.source + [source], heading=self.heading + [''])
 
     def copy(self) -> 'VectorIndex':
         """Deep copy; snapshots must not alias arrays that later mutate."""
-        return VectorIndex(vecs=self.vecs.copy(),
-                           labels=list(self.labels), source=list(self.source))
+        return VectorIndex(vecs=self.vecs.copy(), labels=list(self.labels),
+                           source=list(self.source), heading=list(self.heading))
 
     # -- retrieval / voting ----------------------------------------------
-    def vote(self, query, k=10, mask=None):
+    def vote(self, query, k=10, mask=None, return_rows=False):
         """Top-k weighted vote for a normalized query vector.
 
         Returns ``(ranked, neighbors)`` where ``ranked`` is a list of
@@ -84,12 +93,13 @@ class VectorIndex:
         similarity desc, and ``neighbors`` is a list of ``(label, source,
         sim)`` for the top-k rows (used for OCR floor override).
         ``mask`` (bool ``[N]``) restricts the vote to those rows, e.g. one
-        floor after OCR reads a room sign.
+        floor after OCR reads a room sign. ``return_rows`` also returns the
+        top-k row indices (for their headings).
         """
         query = normalize(np.asarray(query, dtype=np.float32).reshape(-1))
         rows = np.arange(len(self)) if mask is None else np.flatnonzero(mask)
         if len(rows) == 0:
-            return [], []
+            return ([], [], []) if return_rows else ([], [])
         sims = self.vecs[rows] @ query  # vectors already normalized -> cosine.
         k = min(k, len(rows))
         # Highest similarities first; on equal similarity a correction sorts
@@ -120,4 +130,4 @@ class VectorIndex:
         ranked = sorted(tally.values(),
                         key=lambda b: (b['spot'] == precedence, b['votes'], b['corrected'], b['sim']),
                         reverse=True)
-        return ranked, neighbors
+        return (ranked, neighbors, top.tolist()) if return_rows else (ranked, neighbors)

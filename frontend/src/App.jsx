@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
+import SecondPhoto from './screens/SecondPhoto.jsx'
+import { nextStep } from './lib/tiers.js'
+import { spotName } from './lib/spots.js'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
 import ManualStart from './screens/ManualStart.jsx'
@@ -17,16 +20,21 @@ function initialDest(fallback) {
   return to && to.trim() ? to.trim() : fallback
 }
 
-// Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
+// The opening plays once per browser session (storage can be blocked, in which
+// case it simply plays again).
+const OPENING_KEY = 'hound-opening-seen'
+function openingSeen() { try { return sessionStorage.getItem(OPENING_KEY) === '1' } catch { return false } }
+
+// Snap → Locating → (second photo) → Confirm or picker → Route, one step at a time.
 export default function App() {
   const env = import.meta.env || {}
   const [selection, setSelection] = useState({ school: 'bu', building: 'cds' })
   const [choosing, setChoosing] = useState(false)
   const building = buildingConfig(selection.school, selection.building, env)
   const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
-  // The logo intro plays once per app load, over whatever screen opens first.
-  const [intro, setIntro] = useState(true)
-  const endIntro = useCallback(() => setIntro(false), [])
+  // The logo intro plays over whatever screen opens first.
+  const [intro, setIntro] = useState(() => !openingSeen())
+  const endIntro = useCallback(() => { setIntro(false); try { sessionStorage.setItem(OPENING_KEY, '1') } catch { /* plays again next time */ } }, [])
   const splash = intro && <Intro onDone={endIntro} />
   if (choosing || !building?.available) {
     return <>{splash}<CampusPicker current={building || { schoolId: 'bu' }} env={env}
@@ -48,6 +56,9 @@ function Navigation({ api, building, onSchoolChange }) {
   const [photo, setPhoto] = useState(null) // { blob, url }
   const [loc, setLoc] = useState(null) // /locate response
   const [here, setHere] = useState(null) // confirmed spot
+  const [firstLoc, setFirstLoc] = useState(null) // first photo's answer while the second is matched
+  const [confirmMode, setConfirmMode] = useState('confirm') // lib/tiers.js
+  const [autoPicked, setAutoPicked] = useState(false) // route started without a confirm tap
   const [toast, setToast] = useState(null) // { msg, celebrate }
 
   // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
@@ -78,7 +89,7 @@ function Navigation({ api, building, onSchoolChange }) {
 
   const restart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url) // drop the local preview; nothing is kept
-    setPhoto(null); setLoc(null); setHere(null); setScreen('snap')
+    setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('snap')
   }
 
   // `from` is where the home building drawing sat on screen, so the manual locator
@@ -88,8 +99,19 @@ function Navigation({ api, building, onSchoolChange }) {
     if (photo?.url) URL.revokeObjectURL(photo.url)
     setFlyFrom(from && Number.isFinite(from.w) ? from : null)
     window.scrollTo(0, 0)
-    setPhoto(null); setLoc(null); setHere(null); setScreen('manual')
+    setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('manual')
   }
+
+  // Calibrated tiers: sure -> straight to the route; unsure -> one more photo
+  // facing the other way; in between (or after the second photo) -> pick.
+  const located = (r) => {
+    const step = nextStep(r, { fused: !!firstLoc })
+    setLoc(r)
+    if (step === 'auto') { setHere(r.spot); setAutoPicked(true); setScreen('route') }
+    else if (step === 'second') setScreen('second')
+    else { setConfirmMode(step); setScreen('confirm') }
+  }
+  const pickInstead = () => { setAutoPicked(false); setConfirmMode('picker'); setScreen('confirm') }
 
   const statusPill =
     MOCK ? { tone: 'muted', text: 'Demo data · backend not connected' }
@@ -127,16 +149,25 @@ function Navigation({ api, building, onSchoolChange }) {
       {screen === 'locating' && (
         <Locating
           photo={photo}
-          onDone={(r) => { setLoc(r); setScreen('confirm') }}
+          previous={firstLoc?.photo_id}
+          onDone={located}
           onCancel={restart}
           onManual={chooseStart}
           api={api}
           buildingLabel={building.shortName || building.name}
         />
       )}
+      {screen === 'second' && (
+        <SecondPhoto
+          photo={photo}
+          onPhoto={(p) => { setFirstLoc(loc); setPhoto(p); setScreen('locating') }}
+          onSkip={() => { setConfirmMode('picker'); setScreen('confirm') }}
+          onManual={chooseStart}
+        />
+      )}
       {screen === 'confirm' && (
         <Confirm
-          photo={photo} loc={loc}
+          photo={photo} loc={loc} mode={confirmMode} fused={!!firstLoc}
           onConfirm={(spot, learned) => {
             setHere(spot)
             if (learned) {
@@ -157,6 +188,13 @@ function Navigation({ api, building, onSchoolChange }) {
           floors={building.floors} groups={building.destinationGroups} flyFrom={flyFrom}
           onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
       )}
+      {screen === 'route' && autoPicked && (
+        // Auto-picked without a tap: one obvious way out if it's wrong.
+        <p className="rise mt-2 flex items-center justify-between gap-3 rounded-2xl border border-edge bg-card px-4 py-2.5 text-[14px]">
+          <span className="min-w-0 text-dim">Matched to <span className="font-semibold text-fg">{spotName(here, building.roomLabels)}</span></span>
+          <button onClick={pickInstead} className="min-h-[36px] shrink-0 font-semibold underline underline-offset-[3px]">Not here?</button>
+        </p>
+      )}
       {screen === 'route' && (
         <Route
           from={here} heading={here === loc?.spot ? loc?.heading : undefined} photo={here === loc?.spot ? photo : null}
@@ -169,7 +207,7 @@ function Navigation({ api, building, onSchoolChange }) {
       )}
 
       {toast && (
-        <div role="status" className="rise fixed inset-x-4 bottom-32 z-30 mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-edge bg-raise px-4 py-3 text-left text-[14px] text-fg shadow-[var(--shadow-float)]">
+        <div role="status" className="rise fixed inset-x-4 top-[max(.75rem,env(safe-area-inset-top))] z-30 mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-edge bg-raise px-4 py-3 text-left text-[14px] text-fg shadow-[var(--shadow-float)]">
           {toast.celebrate && <PawBurst size={30} className="shrink-0" />}
           <span className="flex-1">{toast.msg}</span>
         </div>

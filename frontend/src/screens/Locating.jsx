@@ -4,7 +4,9 @@ import Icon from '../components/Icon.jsx'
 import PhotoLoader from '../components/PhotoLoader.jsx'
 import { Button, Sheet, TextAction, TopBar } from '../components/ui.jsx'
 
-export default function Locating({ photo, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
+// `previous`: the first photo's photo_id when this is the "turn around and snap
+// once more" photo; the backend adds both photos' votes.
+export default function Locating({ photo, previous, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
   const [attempt, setAttempt] = useState(0)
@@ -22,7 +24,7 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
     // message; we only surface it. The controller cancels the in-flight /locate on
     // retake/unmount so a stale result never lands.
     const locateRequest = api?.locate || locate
-    locateRequest(photo.blob, { signal: controller.signal })
+    locateRequest(photo.blob, { signal: controller.signal, previous })
       .then((r) => { if (live) onDone(r) })
       .catch((e) => {
         // Aborts come from retake/unmount only; that path unmounts us, so ignore it.
@@ -42,7 +44,7 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
     return (
       <PhotoLoader photoUrl={photo.url} flash={false}
         title={stage === 'sending' ? 'Sending your photo…' : 'Finding your spot…'}
-        detail={stage === 'sending' ? 'Uploading it now. It’s deleted right after matching.' : `Comparing it to hallway views in ${buildingLabel}.`}
+        detail={stage === 'sending' ? 'Uploading it now. It’s deleted right after matching.' : `${previous ? 'Combining both photos' : 'Comparing it'} with hallway views in ${buildingLabel}.`}
         steps={[
           { label: 'Photo ready', state: 'done' },
           { label: 'Photo sent', state: stage === 'sending' ? 'now' : 'done' },

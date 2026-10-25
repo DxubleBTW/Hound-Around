@@ -4,7 +4,10 @@ import { floorName, floorOf, spotName } from '../lib/spots.js'
 import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
+import { compactSteps } from '../lib/steps.js'
+import { exitLabel, stepsByLeg, usableLegs } from '../lib/legs.js'
 import PawBurst from '../components/PawBurst.jsx'
+import RoutePath from '../components/RoutePath.jsx'
 import Icon from '../components/Icon.jsx'
 import { floorMark } from '../lib/floors.js'
 import { BottomBar, Button, Sheet, TextAction, TopBar, focusRing } from '../components/ui.jsx'
@@ -165,7 +168,8 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
     )
   }
 
-  const steps = data.steps || []
+  // Tiny "keep straight" steps fold into the next sign (lib/steps.js).
+  const steps = compactSteps(data.steps || [], stepKind)
   const arrived = i >= steps.length
   const step = steps[i]
   const kind = step ? stepKind(step.instruction) : null
@@ -189,6 +193,14 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
   const detail = vertical
     ? prettifyLandmark(step.instruction, roomLabels[step.node])
     : toward ? `toward ${toward}` : (step ? prettifyLandmark(step.instruction, roomLabels[step.node]) : '')
+
+  // The floor you're on, drawn as your own path (lib/legs.js, components/RoutePath.jsx):
+  // the leg holding this step. Older backends send no legs; then it's words only.
+  const legs = usableLegs(data)
+  const groups = legs ? stepsByLeg(steps, stepKind, legs.length) : null
+  let legIndex = 0
+  if (groups) { let seen = 0; legIndex = groups.findIndex((g) => (seen += g.length) > i); if (legIndex < 0) legIndex = groups.length - 1 }
+  const leg = groups ? legs[legIndex] : null
 
   if (arrived) {
     return (
@@ -276,6 +288,25 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
             <p className="text-[14px] text-dim">{stairDir === 'down' ? 'Going down to' : stairDir === 'up' ? 'Going up to' : 'Change to'}</p>
             <p className="font-display text-[30px] font-bold leading-tight">{levelName || 'next floor'}</p>
           </div>
+        </section>
+      )}
+
+      {leg && (
+        <section key={`leg${legIndex}`} className={`${stepAnim} glass mt-3 rounded-[26px] p-4`} aria-labelledby="leg-title">
+          <div className="flex items-baseline justify-between gap-3">
+            <p id="leg-title" className="font-display text-[18px] font-bold">{floorName(leg.floor)}</p>
+            {legs.length > 1 && <p className="text-[13px] text-dim">Part {legIndex + 1} of {legs.length}</p>}
+          </div>
+          <div className="mt-3 flex justify-center">
+            <RoutePath points={leg.points} exitMode={leg.exit?.mode} endLabel={(destText.match(/\b(B?\d{2,3}[A-Z]?)\b/) || [])[1] || ''}
+              label={leg.exit
+                ? `Your path on ${floorName(leg.floor)}, from you to the ${leg.exit.mode === 'stairs' ? 'stairs' : 'elevator'}.`
+                : `Your path on ${floorName(leg.floor)}, from you to ${destText}.`} />
+          </div>
+          <p className="mt-3 flex items-center gap-2 text-[14px] font-semibold">
+            <Icon name={leg.exit ? 'elevator' : 'flag'} size={17} />
+            {leg.exit ? exitLabel(leg.exit) : `Follow the line to ${destText}`}
+          </p>
         </section>
       )}
 

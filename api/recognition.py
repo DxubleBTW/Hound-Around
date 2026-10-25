@@ -1,7 +1,8 @@
 """Integration boundary for the ML lead's implementation.
 
 Set HOUND_ML_FACTORY=package.module:create_backend. The factory is called once
-with data_dir (Path). It returns an object with size, model_name, locate(image),
+with data_dir (Path). It returns an object with size, model_name, locate(image)
+(and locate(image, previous=vector) for the two-photo flow),
 prepare_correction(vector, label), apply_correction(prepared), snapshot(), and
 restore(snapshot). locate returns the contract dictionary plus an internal
 `vector` numpy array. Mutations and inference are serialized by the API.
@@ -28,7 +29,7 @@ class StubBackend:
     def size(self):
         return len(self.labels)
 
-    def locate(self, image):
+    def locate(self, image, previous=None):
         vector = np.zeros(384, dtype=np.float32)
         vector[0] = 1
         return {'spot': self.node['id'], 'floor': self.node['floor'], 'heading': None,

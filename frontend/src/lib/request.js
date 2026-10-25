@@ -93,6 +93,8 @@ function validResponse(data, operation) {
       && (data.ocr_room === null || spot(data.ocr_room))
       && (data.ocr_floor === null || [-1, 1, 2].includes(data.ocr_floor))
       && nonnegative(data.ms)
+      && (data.p_correct == null || (nonnegative(data.p_correct) && data.p_correct <= 1))
+      && (data.tier == null || ['auto', 'picker', 'second'].includes(data.tier))
       && Array.isArray(data.top3) && data.top3.length > 0 && data.top3.length <= 3
       && data.top3.every((vote) => vote && spot(vote.spot) && Number.isInteger(vote.votes) && vote.votes >= 0)
   }

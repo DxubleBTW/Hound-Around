@@ -86,7 +86,8 @@ def main():
                 status = "keep"
             dest = args.out / ("train/" + label if status == "keep" else status)
             dest.mkdir(parents=True, exist_ok=True)
-            name = f"{label}__{video}_t{t:05.1f}.jpg"
+            yaw = re.search(r"(_y\d{3})_\d+\.jpg$", f.name)  # split_360.py crops share one video and t
+            name = f"{label}__{video}{yaw.group(1) if yaw else ''}_t{t:05.1f}.jpg"
             shutil.copy2(f, dest / name)
             rows.append([name, video, t, label, note.split(":")[0].split(" ")[0], in_graph,
                          round(sharpness), dup, status, next_spot[idx]])

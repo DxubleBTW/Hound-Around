@@ -8,8 +8,13 @@ pairs with ``<data_dir>/dataset/train``), keeps ``status == keep``, embeds, and 
 - ``vecs`` float16 ``[N, 384]`` (L2-normalized)
 - ``labels`` str ``[N]``
 - ``source`` str ``[N]`` = ``"video"``
+- ``heading`` str ``[N]``: graph node the frame faces, ``''`` when unknown (optional; older indexes lack it).
+  ``python -m ml.build_index --add-headings`` adds it to an existing index without re-embedding.
 
-Each spot is capped at ~60 frames, sampled evenly across time with a fixed seed.
+Each spot is capped at 250 frames, sampled evenly across time with a fixed seed
+(60 -> 250: +2 top-1, +1 floor under leave-one-video-out; past 250 it is flat).
+Every frame adds one row per :data:`ml.embedder.INDEX_VIEWS` view (whole frame,
+left and right crop), all with the frame's label, so N = 3 x frames.
 Only spots that are nodes in ``graph.json`` on floors -1, 1 or 2 are included.
 Per-spot counts are printed, plus the re-film list (spots under 20 frames).
 
@@ -29,9 +34,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ml.embedder import DIM, normalize
+from ml.embedder import DIM, INDEX_VIEWS, index_views, normalize
 
-CAP_PER_SPOT = 60
+CAP_PER_SPOT = 250
+# 360-camera views (datasets named *360*) get their own budget on top of the phone frames. Sharing the cap let
+# hundreds of 360 crops crowd out the phone frames that phone queries match best (top-3 at those spots 33% -> 19%);
+# added on top they were neutral overall and slightly better at their spots (LOVO, Sat night).
+CAP_360_PER_SPOT = 40
 REFILM_THRESHOLD = 20
 SEED = 1234
 VALID_FLOORS = (-1, 1, 2)
@@ -109,7 +118,8 @@ def keep_frames(data_dir, exclude_videos=()):
 def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None):
     """Build and return ``(VectorIndex-like arrays)`` and write ``index.npz``.
 
-    Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed.
+    Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed
+    (each frame is ``len(INDEX_VIEWS)`` rows).
     ``embed_fn`` is injectable (fake in tests); defaults to DINOv2.
     """
     data_dir = Path(data_dir)
@@ -120,36 +130,86 @@ def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), ou
         from ml.embedder import Dinov2Embedder  # lazy heavy import
         embed_fn = Dinov2Embedder()
 
-    by_spot = keep_frames(data_dir, exclude_videos)
-
-    vecs_parts, labels, counts = [], [], {}
-    for spot in sorted(by_spot):
-        if spot not in valid_nodes:
-            continue
-        frames = even_sample(by_spot[spot], cap)
-        if not frames:
-            continue
+    headings = frame_headings(data_dir)
+    vecs_parts, labels, row_headings, counts = [], [], [], {}
+    for spot, frames in index_frames(data_dir, valid_nodes, cap, exclude_videos):
         images = [Image.open(f).convert('RGB') for f in frames]
         try:
-            vectors = np.asarray(embed_fn(images), dtype=np.float32).reshape(-1, DIM)
+            views = [view for image in images for view in index_views(image)]
+            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(-1, DIM)
         finally:
             for image in images:
                 image.close()
         vecs_parts.append(normalize(vectors))
         labels.extend([spot] * vectors.shape[0])
-        counts[spot] = vectors.shape[0]
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
+        counts[spot] = len(frames)
 
     vecs = np.vstack(vecs_parts).astype(np.float16) if vecs_parts \
         else np.zeros((0, DIM), dtype=np.float16)
     source = np.asarray(['video'] * len(labels), dtype='U') if labels \
         else np.zeros((0,), dtype='U1')
     labels_arr = np.asarray(labels, dtype='U') if labels else np.zeros((0,), dtype='U1')
+    heading_arr = np.asarray(row_headings, dtype='U') if labels else np.zeros((0,), dtype='U1')
 
     out_path = Path(out_path) if out_path else data_dir / 'index.npz'
-    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source)
+    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr)
 
     _report(counts)
     return out_path, counts
+
+
+def index_frames(data_dir, valid_nodes, cap=CAP_PER_SPOT, exclude_videos=()):
+    """(spot, frame paths) in index row order: spots sorted, phone frames then 360 frames."""
+    by_spot = keep_frames(data_dir, exclude_videos)
+    for spot in sorted(by_spot):
+        if spot not in valid_nodes:
+            continue
+        is_360 = [f for f in by_spot[spot] if '360' in Path(f).parent.parent.parent.name]
+        phone = [f for f in by_spot[spot] if f not in set(is_360)]
+        frames = even_sample(phone, cap) + even_sample(is_360, CAP_360_PER_SPOT)
+        if frames:
+            yield spot, frames
+
+
+def frame_headings(data_dir):
+    """frame path -> the graph node the frame faces (labels.csv ``heading``), where recorded."""
+    from ml.backend import manifest_paths
+
+    data_dir = Path(data_dir)
+    out = {}
+    for manifest in manifest_paths(data_dir):
+        train_dir = data_dir / 'dataset' / 'train' if manifest.parent == data_dir else manifest.parent / 'train'
+        with open(manifest, newline='') as handle:
+            for row in csv.DictReader(handle):
+                heading = (row.get('heading') or '').strip()
+                if row.get('status') == 'keep' and heading and row.get('label') and row.get('file'):
+                    out[str(train_dir / row['label'] / row['file'])] = heading
+    return out
+
+
+def add_headings(data_dir, index_path=None, cap=CAP_PER_SPOT):
+    """Write per-row headings into an existing index without re-embedding.
+
+    Recomputes the row order from the manifests and refuses to write unless it
+    reproduces the index's labels exactly (same frames, same sampling)."""
+    data_dir = Path(data_dir)
+    index_path = Path(index_path) if index_path else data_dir / 'index.npz'
+    graph = json.loads((data_dir / 'graph.json').read_text())
+    valid_nodes = {n['id'] for n in graph.get('nodes', []) if n.get('floor') in VALID_FLOORS}
+    headings = frame_headings(data_dir)
+    labels, row_headings = [], []
+    for spot, frames in index_frames(data_dir, valid_nodes, cap):
+        labels.extend([spot] * len(frames) * len(INDEX_VIEWS))
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
+    data = dict(np.load(index_path, allow_pickle=False))
+    if [str(x) for x in data['labels']] != labels:
+        raise ValueError('Index rows do not match the manifests; rebuild the index instead')
+    data['heading'] = np.asarray(row_headings, dtype='U')
+    np.savez(index_path, **data)
+    known = sum(1 for h in row_headings if h)
+    print(f'{known} of {len(row_headings)} rows have a heading')
+    return index_path
 
 
 def _report(counts):
@@ -158,7 +218,7 @@ def _report(counts):
         print(f'  {spot}: {counts[spot]}')
     refilm = sorted(s for s, c in counts.items() if c < REFILM_THRESHOLD)
     total = sum(counts.values())
-    print(f'Total frames indexed: {total} across {len(counts)} spots')
+    print(f'Total frames indexed: {total} ({total * len(INDEX_VIEWS)} rows) across {len(counts)} spots')
     if refilm:
         print(f'Re-film list (< {REFILM_THRESHOLD} frames): {", ".join(refilm)}')
     else:
@@ -167,5 +227,7 @@ def _report(counts):
 
 if __name__ == '__main__':  # pragma: no cover - CLI, human-blocked on real data
     import os
+    import sys
 
-    build_index(Path(os.getenv('HOUND_DATA_DIR', 'data')))
+    data = Path(os.getenv('HOUND_DATA_DIR', 'data'))
+    add_headings(data) if '--add-headings' in sys.argv else build_index(data)
