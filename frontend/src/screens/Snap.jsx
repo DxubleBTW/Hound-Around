@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { shrinkImage, BLUR_THRESHOLD } from '../lib/image.js'
 import { ALL_DESTS, resolveDestination } from '../lib/destinations.js'
+import { ElevatorIcon } from '../components/Paw.jsx'
+
+// Quick-pick labels read as plain phrases ("Restrooms, Floor 1").
+const plain = (label = '') => label.replace(/\s·\s/g, ', ')
 
 export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto, onManual, destinations = ALL_DESTS, destinationGroups, resolvePlace = resolveDestination }) {
   const groups = destinationGroups || [{ title: 'Destinations', items: destinations }]
   const input = useRef(null)
   const [busy, setBusy] = useState(false)
   const [hint, setHint] = useState('')
+  const [picking, setPicking] = useState(false)
   const active = useRef(true)
   const preparation = useRef(0)
   useEffect(() => {
@@ -37,84 +42,101 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
     }
   }
 
-  return (
-    <main className="rise flex flex-1 flex-col">
-      <header className="pt-6">
-        <div className="flex items-center gap-2">
-          <img src="/favicon.svg" alt="" className="h-9 w-9" />
-          <h1 className="font-display text-2xl font-extrabold tracking-tight">Hound Around</h1>
-        </div>
-        <div className="drift mt-6 overflow-hidden rounded-3xl bg-gradient-to-br from-scarlet via-scarlet-dark to-ink p-6 text-paper shadow-[0_24px_50px_-20px_rgba(204,0,0,.6)]">
-          <p className="font-display text-[2.6rem] font-extrabold leading-[1.02] tracking-tight">
-            Never lost <span className="text-paper/80">around here.</span>
-          </p>
-          <p className="mt-3 text-paper/85">Snap the hallway you’re in. We’ll sniff out where you are and walk you to your room.</p>
-        </div>
-      </header>
+  const canShoot = !busy && dest.trim()
+  const openCamera = () => { if (canShoot) input.current?.click() }
 
-      <section className="mt-8 space-y-4">
-        <div className="space-y-2">
-          <label htmlFor="dest" className="text-sm font-semibold">Where to?</label>
-          <input
-            id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
-            onBlur={(e) => { const r = resolvePlace(e.target.value); if (r !== e.target.value) setDest(r) }}
-            list="dest-suggestions"
-            placeholder={destinations[0]?.value ? `Room number or place, e.g. ${destinations[0].value}` : 'Room number or place'}
-            className="w-full rounded-2xl border border-line bg-white px-4 py-3.5 text-lg shadow-sm outline-none transition focus:border-scarlet focus:ring-2 focus:ring-scarlet/20"
-            autoComplete="off" inputMode="text"
-            aria-describedby="dest-hint"
-          />
+  return (
+    <main className="flex flex-1 flex-col gap-5 pt-5">
+      {/* The frame is a second, larger way to open the camera. There is no live
+          viewfinder: it shows how to aim and repeats the privacy promise. */}
+      <button type="button" onClick={openCamera} disabled={!canShoot} aria-label="Take a photo of the hallway"
+        className="press relative min-h-[200px] flex-1 overflow-hidden rounded-[3px] bg-wine disabled:opacity-60">
+        <svg viewBox="0 0 350 300" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
+          <path d="M0 300 L120 170 H230 L350 300 M120 170 V0 M230 170 V0" fill="none" stroke="#3A1219" strokeWidth="1.5" />
+        </svg>
+        {['left-4 top-4 border-l-2 border-t-2', 'right-4 top-4 border-r-2 border-t-2', 'bottom-4 left-4 border-b-2 border-l-2', 'bottom-4 right-4 border-b-2 border-r-2'].map((c) => (
+          <span key={c} aria-hidden className={`absolute h-6 w-6 border-snow ${c}`} />
+        ))}
+        <span className="absolute inset-x-10 bottom-9 flex flex-col gap-1 text-center">
+          <span className="text-base">{busy ? 'Preparing your photo…' : 'Point down the hall or at a room number.'}</span>
+          <span className="text-sm text-mist">Your photo is deleted after matching.</span>
+        </span>
+      </button>
+
+      <section className="space-y-3">
+        <div>
+          <label htmlFor="dest" className="text-sm text-mist">Going to</label>
+          <div className="flex items-end gap-3 border-b-2 border-snow">
+            <input
+              id="dest" value={dest} onChange={(e) => setDest(e.target.value)}
+              onBlur={(e) => { const r = resolvePlace(e.target.value); if (r !== e.target.value) setDest(r) }}
+              list="dest-suggestions"
+              placeholder={destinations[0]?.value ? `e.g. ${destinations[0].value}` : 'Room number'}
+              className="min-w-0 flex-1 bg-transparent pb-1 font-display text-[30px] font-semibold leading-tight text-snow outline-none placeholder:text-dim"
+              autoComplete="off" inputMode="text"
+              aria-describedby="dest-hint"
+            />
+            <button type="button" onClick={() => setPicking((p) => !p)} aria-expanded={picking} aria-controls="dest-picks"
+              className="min-h-[44px] shrink-0 pb-1 text-[15px] underline underline-offset-[3px]">
+              {picking ? 'Done' : 'Pick a room'}
+            </button>
+          </div>
           {/* Suggestions are drawn ONLY from the verified set so nothing implies rooms we can't route to. */}
           <datalist id="dest-suggestions">
-            {destinations.map((d) => <option key={d.value} value={d.value}>{d.label || d.name}</option>)}
+            {destinations.map((d) => <option key={d.value} value={d.value}>{plain(d.label || d.name)}</option>)}
           </datalist>
-          <p id="dest-hint" className="text-xs text-muted">Type a room number or choose one of this building’s suggestions.</p>
+          <p id="dest-hint" className="mt-1.5 text-sm text-mist">Type a room number, or pick one of this building’s rooms.</p>
         </div>
 
-        {/* Grouped quick-picks: a tidy, scrollable chip set from verified-real destinations only. */}
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <div key={group.title}>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{group.title}</p>
-              <div className="flex flex-wrap gap-2">
-                {group.items.map((q) => {
-                  const active = resolvePlace(dest) === q.value
-                  return (
-                    <button key={q.value} type="button" onClick={() => setDest(q.value)}
-                      aria-pressed={active}
-                      className={`min-h-[44px] rounded-full border px-3.5 py-2 text-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet ${active ? 'border-scarlet bg-scarlet/10 font-semibold text-scarlet shadow-sm' : 'border-line text-muted hover:border-scarlet/40'}`}>
-                      {q.label || q.name}
-                    </button>
-                  )
-                })}
+        {picking && (
+          <div id="dest-picks" className="enter space-y-3">
+            {groups.map((group) => (
+              <div key={group.title}>
+                <p className="mb-1.5 text-sm text-mist">{group.title}</p>
+                <div className="flex flex-wrap gap-2">
+                  {group.items.map((q) => {
+                    const selected = resolvePlace(dest) === q.value
+                    return (
+                      <button key={q.value} type="button" aria-pressed={selected}
+                        onClick={() => { setDest(q.value); setPicking(false) }}
+                        className={`press min-h-[44px] rounded-sm px-3.5 text-[15px] ${selected ? 'bg-snow font-bold text-night' : 'bg-panel text-snow hover:bg-[#222]'}`}>
+                        {plain(q.label || q.name)}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <button onClick={() => setAccessible(!accessible)} role="switch" aria-checked={accessible}
-          className="flex w-full items-center justify-between rounded-2xl border border-line bg-white px-4 py-3.5 shadow-sm transition active:scale-[.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
-          <span className="text-left">
-            <span className="block font-semibold">Elevators only</span>
-            <span className="block text-sm text-muted">Accessible route, no stairs</span>
+          className="flex min-h-[52px] w-full items-center justify-between gap-3 text-left">
+          <span className="flex items-center gap-3">
+            <ElevatorIcon size={22} />
+            <span>
+              <span className="block">Elevators only</span>
+              <span className="block text-sm text-mist">No stairs anywhere on your route</span>
+            </span>
           </span>
-          <span className={`relative h-7 w-12 rounded-full transition ${accessible ? 'bg-scarlet' : 'bg-line'}`}>
-            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${accessible ? 'left-6' : 'left-1'}`} />
+          <span aria-hidden className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ${accessible ? 'bg-snow' : 'bg-rule'}`}>
+            <span className={`absolute left-1 top-1 h-5 w-5 rounded-full transition-transform duration-200 ease-[cubic-bezier(.23,1,.32,1)] ${accessible ? 'translate-x-5 bg-night' : 'bg-snow'}`} />
           </span>
         </button>
       </section>
 
-      <div className="mt-auto pt-8">
+      <div className="space-y-2">
         <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
-        <button onClick={() => input.current?.click()} disabled={busy || !dest.trim()}
-          className="group relative flex min-h-[44px] w-full items-center justify-center gap-3 overflow-hidden rounded-3xl bg-gradient-to-b from-scarlet to-scarlet-dark py-5 font-display text-xl font-bold text-white shadow-[0_14px_34px_-10px_rgba(204,0,0,.65)] transition-transform duration-150 active:scale-[.98] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
-          <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/10 to-white/15 opacity-0 transition-opacity group-active:opacity-100" />
-          {busy ? <span className="paw-trail inline-flex gap-1" aria-hidden><span>🐾</span><span>🐾</span><span>🐾</span></span> : <CameraIcon />}
-          <span className="relative">{busy ? 'Preparing…' : 'Snap the hallway'}</span>
+        {hint && <p role="alert" className="enter rounded-sm bg-wine px-4 py-3 text-[15px]">{hint}</p>}
+        <button onClick={openCamera} disabled={!canShoot}
+          className="press flex min-h-[56px] w-full items-center justify-center gap-2.5 rounded-sm bg-snow font-display text-[19px] font-semibold text-night disabled:opacity-50">
+          <CameraIcon />
+          {busy ? 'Preparing…' : 'Take photo'}
         </button>
-        {hint && <p role="alert" className="mt-3 rounded-2xl bg-scarlet/5 px-4 py-3 text-center text-sm font-medium text-scarlet">{hint}</p>}
-        <button onClick={onManual} disabled={busy || !dest.trim()} className="min-h-[44px] w-full py-3 font-semibold text-muted disabled:opacity-50">Choose my starting room instead</button>
-        <p className="mt-3 text-center text-xs text-muted">No GPS, no tracking. Your photo is deleted after matching.</p>
+        <button onClick={onManual} disabled={busy || !dest.trim()}
+          className="min-h-[44px] w-full text-base underline underline-offset-[3px] disabled:text-dim disabled:no-underline">
+          No camera? Type the room you’re next to
+        </button>
       </div>
     </main>
   )
@@ -122,7 +144,7 @@ export default function Snap({ dest, setDest, accessible, setAccessible, onPhoto
 
 function CameraIcon() {
   return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
       <circle cx="12" cy="13.5" r="3.5" />
     </svg>

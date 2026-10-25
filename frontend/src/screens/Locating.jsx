@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { locate } from '../api.js'
 
+// Two plain frames behind the photo give the stack its depth. They are not
+// matched images: only the user's own photo is ever shown.
+const STACK = [
+  { '--r': '-6deg', '--sx': '-44px', '--sy': '30px', '--sr': '-18deg', background: '#1F1F1F' },
+  { '--r': '5deg', '--sx': '46px', '--sy': '24px', '--sr': '16deg', background: '#2A2A2A', animationDelay: '60ms' },
+]
+
 export default function Locating({ photo, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
@@ -34,54 +41,62 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
     }
   }, [photo.blob, api, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const unrecognized = error?.code === 'unrecognized_location'
+
   return (
-    <main className="rise flex flex-1 flex-col">
-      <div className="relative mt-4 aspect-[3/4] w-full overflow-hidden rounded-3xl bg-ink shadow-[0_24px_50px_-20px_rgba(26,20,20,.7)]">
-        <img src={photo.url} alt="Your hallway photo" className="h-full w-full object-cover opacity-80" />
-        {!error && (
-          <>
-            {/* Dark vignette keeps the scan motif legible over any photo. */}
-            <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-ink/30" />
-            <div className="scan-line absolute inset-x-0 h-1 bg-scarlet shadow-[0_0_24px_6px_rgba(204,0,0,.55)]" />
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 text-paper">
-              <span className="paw-trail inline-flex gap-1 text-lg" aria-hidden><span>🐾</span><span>🐾</span><span>🐾</span></span>
-              <span className="text-xs font-semibold uppercase tracking-wider text-paper/80">sniffing</span>
-            </div>
-          </>
-        )}
+    <main className="flex flex-1 flex-col gap-6 pt-6">
+      <div className="relative mx-auto aspect-[3/4] w-[58%] max-w-[230px]">
+        {STACK.map((style, i) => <span key={i} aria-hidden className="settle absolute inset-0 rounded-[2px]" style={style} />)}
+        <div className="settle absolute inset-0 overflow-hidden rounded-[2px] bg-panel" style={{ '--sy': '40px', animationDelay: '120ms' }}>
+          <img src={photo.url} alt="Your hallway photo" className={`h-full w-full object-cover ${error ? 'opacity-50' : ''}`} />
+          {!error && <span aria-hidden className="scan absolute inset-x-0 h-[2px] bg-snow/80" />}
+        </div>
       </div>
 
       {!error ? (
-        <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">
-            <span className="sniff inline-block">🐾</span> {stage === 'sending' ? 'Sending…' : 'Matching…'}
-          </p>
-          <p className="mt-2 text-muted">
-            {stage === 'sending'
-              ? 'Uploading your photo.'
-              : `Comparing your photo to hallway views in ${buildingLabel}.`}
-          </p>
-          {/* Pulsing match meter: a live "working" rhythm, not a real progress value. */}
-          <div className="mx-auto mt-6 flex max-w-[12rem] items-center justify-center gap-1.5" aria-hidden>
-            {Array.from({ length: 7 }).map((_, i) => (
-              <span
-                key={i}
-                className={`pulse-soft h-6 w-2 rounded-full ${stage === 'matching' ? 'bg-scarlet' : 'bg-line'}`}
-                style={{ animationDelay: `${i * 0.12}s` }}
-              />
-            ))}
+        <div role="status" aria-live="polite" className="space-y-5">
+          <div className="space-y-2">
+            <h2 className="font-display text-[40px] font-semibold leading-none">{stage === 'sending' ? 'Sending' : 'Matching'}</h2>
+            <p className="text-[17px] leading-snug text-mist">Comparing your photo with hallway views in {buildingLabel}. This usually takes a second.</p>
           </div>
+          <ul className="space-y-3 text-base">
+            <li className="flex items-center gap-3">
+              {stage === 'sending'
+                ? <span aria-hidden className="grid w-[18px] place-items-center"><span className="breathe block h-2.5 w-2.5 rounded-full bg-snow" /></span>
+                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden><path d="M5 12l5 5 9-10" /></svg>}
+              {stage === 'sending' ? 'Sending your photo' : 'Photo sent'}
+            </li>
+            <li className={`flex items-center gap-3 ${stage === 'sending' ? 'text-dim' : ''}`}>
+              <span aria-hidden className="grid w-[18px] place-items-center">
+                {stage === 'sending'
+                  ? <span className="block h-2.5 w-2.5 rounded-full border-[1.5px] border-dim" />
+                  : <span className="breathe block h-2.5 w-2.5 rounded-full bg-snow" />}
+              </span>
+              Finding your spot
+            </li>
+          </ul>
         </div>
       ) : (
-        <div className="mt-8 text-center">
-          <p className="font-display text-2xl font-bold">{error.code === 'unrecognized_location' ? 'We don’t recognize this spot' : 'Hmm, no match yet'}</p>
-          <p role="alert" className="mt-2 break-words text-sm text-muted">{error.message || 'Please try another photo.'}</p>
-          <button onClick={error.code === 'unrecognized_location' ? onCancel : () => setAttempt((a) => a + 1)} className="mt-6 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">{error.code === 'unrecognized_location' ? 'Retake photo' : 'Try again'}</button>
-          <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
+        <div className="space-y-3">
+          <h2 className="font-display text-[36px] font-semibold leading-[1.02]">{unrecognized ? 'We don’t recognize this spot' : 'No match yet'}</h2>
+          <p role="alert" className="break-words text-[17px] leading-snug text-mist">{error.message || 'Please try another photo.'}</p>
         </div>
       )}
 
-      <button onClick={onCancel} className="mt-auto min-h-[44px] py-4 text-sm font-medium text-muted">Retake photo</button>
+      <div className="mt-auto space-y-2">
+        {error && (
+          <button onClick={unrecognized ? onCancel : () => setAttempt((a) => a + 1)}
+            className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night">
+            {unrecognized ? 'Take another photo' : 'Try again'}
+          </button>
+        )}
+        {error && (
+          <button onClick={onManual} className="min-h-[44px] w-full text-base underline underline-offset-[3px]">Type the room you’re next to</button>
+        )}
+        {(!error || !unrecognized) && (
+          <button onClick={onCancel} className="min-h-[44px] w-full text-base underline underline-offset-[3px]">{error ? 'Retake photo' : 'Cancel'}</button>
+        )}
+      </div>
     </main>
   )
 }
