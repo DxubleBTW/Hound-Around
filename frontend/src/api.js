@@ -10,10 +10,13 @@ export function createApi(base = '') {
   const MOCK = !BASE
   return {
     MOCK,
-    async locate(blob, { signal } = {}) {
-      if (MOCK) return mockLocate(signal)
+    // `previous`: the first photo's photo_id when this is the "turn around and
+    // snap once more" photo; the backend adds both photos' votes.
+    async locate(blob, { signal, previous } = {}) {
+      if (MOCK) return mockLocate(signal, previous)
       const fd = new FormData()
       fd.append('image', blob, 'photo.jpg')
+      if (previous) fd.append('previous', previous)
       return requestJson(BASE + '/locate', { method: 'POST', body: fd, signal, operation: 'locate' })
     },
     async route({ from, to, accessible, heading }, { signal } = {}) {
@@ -46,17 +49,22 @@ export const health = defaultApi.health
 // ---------- mock data (ids taken from docs/contract.md examples) ----------
 let mockCalls = 0
 
-function mockLocate(signal) {
+function mockLocate(signal, previous) {
   mockCalls += 1
-  // Alternate confident / unsure so both demo paths (straight to route, top-3 picker) are visible.
+  // Alternate sure / unsure so both demo paths are visible: straight to the
+  // route, or "turn around and snap once more" then the fused top-3 picker.
   const unsure = mockCalls % 2 === 0
-  const res = unsure
+  const res = previous
+    ? { photo_id: `p_mock${mockCalls}`, spot: 'F2_hall_e2', floor: 2, heading: null, confidence: 0.7,
+        top3: [{ spot: 'F2_hall_e2', votes: 14 }, { spot: 'F2_hall_e1', votes: 4 }, { spot: 'F1_lobby', votes: 2 }],
+        ocr_room: null, ocr_floor: null, p_correct: null, tier: 'picker', ms: 610 }
+    : unsure
     ? { photo_id: `p_mock${mockCalls}`, spot: 'F2_hall_e2', floor: 2, heading: 'F2_hall_e3', confidence: 0.5,
         top3: [{ spot: 'F2_hall_e2', votes: 5 }, { spot: 'F1_lobby', votes: 3 }, { spot: 'F2_hall_e1', votes: 2 }],
-        ocr_room: null, ocr_floor: null, ms: 640 }
+        ocr_room: null, ocr_floor: null, p_correct: 0.38, tier: 'second', ms: 640 }
     : { photo_id: `p_mock${mockCalls}`, spot: 'F1_lobby', floor: 1, heading: 'F1_core_elev', confidence: 0.9,
         top3: [{ spot: 'F1_lobby', votes: 9 }, { spot: 'F1_core_elev', votes: 1 }],
-        ocr_room: null, ocr_floor: 1, ms: 580 }
+        ocr_room: null, ocr_floor: 1, p_correct: 0.86, tier: 'auto', ms: 580 }
   return delay(1400, res, signal)
 }
 

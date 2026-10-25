@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import Snap from './screens/Snap.jsx'
 import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
+import SecondPhoto from './screens/SecondPhoto.jsx'
+import { nextStep } from './lib/tiers.js'
+import { spotName } from './lib/spots.js'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
 import Paw from './components/Paw.jsx'
@@ -21,7 +24,7 @@ function initialDest(fallback) {
 }
 
 // Which station of the step line each screen sits at. Manual start skips the line.
-const STEP_OF = { snap: 0, locating: 1, confirm: 2, route: 3 }
+const STEP_OF = { snap: 0, locating: 1, second: 1, confirm: 2, route: 3 }
 
 // Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
 export default function App() {
@@ -64,6 +67,9 @@ function Navigation({ api, building, motion, onSchoolChange }) {
   const [photo, setPhoto] = useState(null) // { blob, url }
   const [loc, setLoc] = useState(null) // /locate response
   const [here, setHere] = useState(null) // confirmed spot
+  const [firstLoc, setFirstLoc] = useState(null) // first photo's answer while the second is matched
+  const [confirmMode, setConfirmMode] = useState('confirm') // lib/tiers.js
+  const [autoPicked, setAutoPicked] = useState(false) // route started without a confirm tap
   const [toast, setToast] = useState(null) // { msg, detail, celebrate }
 
   // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
@@ -94,13 +100,25 @@ function Navigation({ api, building, motion, onSchoolChange }) {
 
   const restart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url) // drop the local preview; nothing is kept
-    setPhoto(null); setLoc(null); setHere(null); setScreen('snap')
+    setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('snap')
   }
 
   const chooseStart = () => {
     if (photo?.url) URL.revokeObjectURL(photo.url)
-    setPhoto(null); setLoc(null); setHere(null); setScreen('manual')
+    setPhoto(null); setLoc(null); setHere(null); setFirstLoc(null); setAutoPicked(false); setScreen('manual')
   }
+
+  // Calibrated tiers: sure -> straight to the route; unsure -> one more photo
+  // facing the other way; in between (or after the second photo) -> pick.
+  const located = (r) => {
+    const step = nextStep(r, { fused: !!firstLoc })
+    setLoc(r)
+    if (step === 'auto') { setHere(r.spot); setAutoPicked(true); setScreen('route') }
+    else if (step === 'second') setScreen('second')
+    else { setConfirmMode(step); setScreen('confirm') }
+  }
+
+  const pickInstead = () => { setAutoPicked(false); setConfirmMode('picker'); setScreen('confirm') }
 
   const status =
     MOCK ? { text: 'Demo data. The backend isn’t connected.' }
@@ -158,16 +176,25 @@ function Navigation({ api, building, motion, onSchoolChange }) {
         {screen === 'locating' && (
           <Locating
             photo={photo}
-            onDone={(r) => { setLoc(r); setScreen('confirm') }}
+            previous={firstLoc?.photo_id}
+            onDone={located}
             onCancel={restart}
             onManual={chooseStart}
             api={api}
             buildingLabel={building.shortName || building.name}
           />
         )}
+        {screen === 'second' && (
+          <SecondPhoto
+            photo={photo}
+            onPhoto={(p) => { setFirstLoc(loc); setPhoto(p); setScreen('locating') }}
+            onSkip={() => { setConfirmMode('picker'); setScreen('confirm') }}
+            onManual={chooseStart}
+          />
+        )}
         {screen === 'confirm' && (
           <Confirm
-            photo={photo} loc={loc}
+            photo={photo} loc={loc} mode={confirmMode} fused={!!firstLoc}
             onConfirm={(spot, learned) => {
               setHere(spot)
               if (learned) {
@@ -185,6 +212,13 @@ function Navigation({ api, building, motion, onSchoolChange }) {
         )}
         {screen === 'manual' && (
           <ManualStart landmarks={building.landmarks} accessible={accessible} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
+        )}
+        {screen === 'route' && autoPicked && (
+          // Auto-picked without a tap: one obvious way out if it's wrong.
+          <p className="mt-4 flex items-center justify-between gap-3 rounded-sm bg-panel px-3.5 py-2.5 text-sm">
+            <span className="min-w-0 text-mist">Matched to {spotName(here, building.roomLabels)}</span>
+            <button onClick={pickInstead} className="min-h-[36px] shrink-0 underline underline-offset-[3px]">Not here?</button>
+          </p>
         )}
         {screen === 'route' && (
           <Route

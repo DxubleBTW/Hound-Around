@@ -16,6 +16,7 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 
+from ml import calibration
 from ml.embedder import DIM, MODEL_NAME, as_embed_fn
 from ml.index import VectorIndex
 from ml.errors import UnrecognizedLocation
@@ -104,13 +105,16 @@ class Backend:
     def size(self) -> int:
         return len(self.index)
 
-    def locate(self, image) -> dict:
+    def locate(self, image, previous=None) -> dict:
+        """``previous``: the vector of an earlier photo from the same spot (the
+        "turn around and snap again" flow). Both photos' votes are added."""
         # Embed, then drop the image reference immediately (never retained).
         vector = np.asarray(self._embed(image), dtype=np.float32).reshape(-1)
         if len(self.index) == 0:
             # Never invent a location (review N07); the API turns this into an error.
             raise RuntimeError('Recognition index is empty')
         ranked, neighbors = self.index.vote(vector, k=self.top_k)
+        first_vote = (ranked, neighbors)
         # Vote agreement is not evidence that a photo belongs to this building:
         # even an unrelated image has ten nearest neighbors. Gate by similarity
         # before OCR or location voting can turn it into a confident answer.
@@ -143,8 +147,38 @@ class Backend:
                     spot, floor = ranked[0]['spot'], target_floor
                     confidence = self._confidence(ranked)
 
+        if previous is not None:
+            # Two photos facing different ways split look-alike hallways. Add the
+            # votes (unmasked, as measured in ml/research/calibrate.py) and let the
+            # user confirm on the fused top 3: never ask for a third photo.
+            tally: dict = {}
+            second_vote = self.index.vote(np.asarray(previous, dtype=np.float32), k=self.top_k)[0]
+            for votes in (first_vote[0], second_vote):
+                for r in votes:
+                    tally[r['spot']] = tally.get(r['spot'], 0) + r['votes']
+            fused = sorted(tally, key=tally.get, reverse=True)
+            spot = fused[0]
+            floor = self._floor.get(spot, 1)
+            ranked = [{'spot': s, 'votes': tally[s]} for s in fused]
+            confidence = self._confidence(ranked, k=2 * self.top_k)
+            top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
+            result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
+            return {**result, 'p_correct': None, 'tier': 'picker'}
+
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
-        return self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
+        span = len({self._floor.get(t['spot']) for t in top3}) > 1
+        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote))
+        result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor)
+        return {**result, 'p_correct': round(p, 3), 'tier': calibration.tier(p, span)}
+
+    def _features(self, spot, confidence, span, ranked, neighbors):
+        """The calibration features, computed exactly as ml/research/calibrate.py does."""
+        best: dict = {}
+        for label, _, sim in neighbors:
+            best[label] = max(best.get(label, -1.0), sim)
+        other = max([s for label, s in best.items() if label != spot], default=0.0)
+        return {'confidence': confidence, 'share': ranked[0]['votes'] / self.top_k,
+                'top_sim': neighbors[0][2], 'margin': best.get(spot, 0.0) - other, 'span': float(span)}
 
     def prepare_correction(self, vector, label) -> VectorIndex:
         # New index with the corrected vector appended, source="correction".
@@ -162,13 +196,13 @@ class Backend:
         self.index = snapshot.copy()
 
     # -- helpers ----------------------------------------------------------
-    def _confidence(self, ranked):
+    def _confidence(self, ranked, k=None):
         """Winner's votes plus votes for spots within NEIGHBORHOOD_M of it, / k."""
         winner = ranked[0]['spot']
         floor = self._floor.get(winner)
         near = {s for s in self._nearby.get(winner, ()) if self._floor.get(s) == floor}
         votes = sum(r['votes'] for r in ranked if r['spot'] == winner or r['spot'] in near)
-        return min(1.0, votes / self.top_k)
+        return min(1.0, votes / (k or self.top_k))
 
     def _choose_heading(self, spot):
         """Most common labels.csv heading for the spot, if a graph neighbor."""

@@ -8,7 +8,7 @@ const STACK = [
   { '--r': '5deg', '--sx': '46px', '--sy': '24px', '--sr': '16deg', background: '#2A2A2A', animationDelay: '60ms' },
 ]
 
-export default function Locating({ photo, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
+export default function Locating({ photo, previous, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
   const [attempt, setAttempt] = useState(0)
@@ -26,7 +26,7 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
     // message; we only surface it. The controller cancels the in-flight /locate on
     // retake/unmount so a stale result never lands.
     const locateRequest = api?.locate || locate
-    locateRequest(photo.blob, { signal: controller.signal })
+    locateRequest(photo.blob, { signal: controller.signal, previous })
       .then((r) => { if (live) onDone(r) })
       .catch((e) => {
         // Aborts come from retake/unmount only; that path unmounts us, so ignore it.
@@ -57,7 +57,9 @@ export default function Locating({ photo, onDone, onCancel, onManual, api, build
         <div role="status" aria-live="polite" className="space-y-5">
           <div className="space-y-2">
             <h2 className="font-display text-[40px] font-semibold leading-none">{stage === 'sending' ? 'Sending' : 'Matching'}</h2>
-            <p className="text-[17px] leading-snug text-mist">Comparing your photo with hallway views in {buildingLabel}. This usually takes a second.</p>
+            <p className="text-[17px] leading-snug text-mist">
+              {previous ? 'Combining both photos' : 'Comparing your photo'} with hallway views in {buildingLabel}. This usually takes a second.
+            </p>
           </div>
           <ul className="space-y-3 text-base">
             <li className="flex items-center gap-3">

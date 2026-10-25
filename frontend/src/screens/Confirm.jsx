@@ -2,23 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { correct } from '../api.js'
 import { floorName, floorOf, spotName } from '../lib/spots.js'
 
-// Preserve the existing very-low-confidence retake fallback. Vote agreement
-// measures uncertainty, not whether the photo belongs to the building. Actual
-// unrelated-photo rejection is performed by the calibrated backend similarity
-// guard and handled by Locating's 422 recovery path.
-const MIN_RELEVANCE = 0.2
-const PICKER_THRESHOLD = 0.6
-
-// Below MIN_RELEVANCE the top guess is too weak to trust as a location at all.
-function isIrrelevant(loc) {
-  return (loc.confidence || 0) < MIN_RELEVANCE
-}
-
-// In the uncertain band, or when the top 3 span floors, show the top-3 picker.
-function needsPicker(loc) {
-  const floors = new Set((loc.top3 || []).map((t) => floorOf(t.spot).code))
-  return loc.confidence < PICKER_THRESHOLD || floors.size > 1
-}
+// `mode` comes from lib/tiers.js: 'confirm' ("Right spot?"), 'picker' (top 3),
+// or 'retake' (the old very-low-confidence fallback for uncalibrated backends;
+// actual unrelated-photo rejection is the backend's 422, handled in Locating).
+// `fused` marks the picker after a second photo.
 
 // Short floor mark for the badge: LL, 1, 2.
 function floorMark(spot) {
@@ -28,8 +15,8 @@ function floorMark(spot) {
 
 const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px] disabled:text-dim'
 
-export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
-  const [picking, setPicking] = useState(() => needsPicker(loc))
+export default function Confirm({ photo, loc, mode = 'confirm', fused = false, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building', roomLabels = {} }) {
+  const [picking, setPicking] = useState(mode === 'picker')
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
   const pending = useRef(null)
@@ -39,7 +26,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
   useEffect(() => () => pending.current?.abort(), [])
 
   // Extremely uncertain answer: preserve the retake fallback and offer manual routing.
-  if (isIrrelevant(loc)) {
+  if (mode === 'retake') {
     return (
       <main className="flex flex-1 flex-col pt-8">
         <div className="flex flex-1 flex-col justify-center gap-5">
@@ -109,7 +96,9 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
         <>
           <div className="space-y-2.5">
             <h2 className="font-display text-[38px] font-semibold leading-[1.02]">Which spot is this?</h2>
-            <p className="text-[17px] leading-snug text-mist">The match wasn’t strong enough to be sure. Pick where you’re standing.</p>
+            <p className="text-[17px] leading-snug text-mist">
+              {fused ? 'We combined both photos. Pick where you’re standing.' : 'The match wasn’t strong enough to be sure. Pick where you’re standing.'}
+            </p>
             {loc.ocr_room && <p className="text-sm text-mist">Saw a sign for Room {loc.ocr_room}.</p>}
           </div>
           <ul className="space-y-2">

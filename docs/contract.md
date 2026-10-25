@@ -40,10 +40,10 @@ The B62 mapping is a placeholder until someone checks the sign.
 ## API
 
 ```
-POST /locate   (multipart: image)
+POST /locate   (multipart: image, optional previous=<photo_id of the first photo>)
 → {"photo_id":"p_8f3a","spot":"F2_hall_e2","floor":2,"heading":"F2_hall_e3",
    "confidence":0.8,"top3":[{"spot":"F2_hall_e2","votes":8},{"spot":"F2_hall_e1","votes":2}],
-   "ocr_room":"248","ocr_floor":2,"ms":640}
+   "ocr_room":"248","ocr_floor":2,"p_correct":0.74,"tier":"auto","ms":640}
 
 GET /route?from=F2_hall_e2&to=164&accessible=true&heading=F2_hall_e3
 → {"steps":[{"instruction":"Turn around and walk toward the podium elevators","meters":22,"node":"F2_podium_elev"}],
@@ -66,7 +66,15 @@ Route instructions start with one of: `Walk`, `Continue`, `Turn left and walk`, 
 "Turn around"); smaller bends merge into the previous step. A destination door beside the corridor ends with
 ", on your left" / ", on your right" instead of a turn, and doors passed mid-route never count as turns.
 
-Confidence = winning votes / 10. Below ~0.6, or when the top 3 span floors, the app shows the top-3 picker. `ocr_room` / `ocr_floor` are null when nothing is read.
+Confidence = winning votes / 10. `ocr_room` / `ocr_floor` are null when nothing is read.
+
+`p_correct` is the calibrated chance the spot is right (within 10 m, right floor; `ml/calibration.py`), and `tier`
+says what the app does next: `auto` (p ≥ 0.7 and the top 3 agree on the floor) goes straight to the route with a
+"Not here?" link; `picker` (0.5 ≤ p < 0.7, or floors split) shows the top 3; `second` (p < 0.5) asks for one more
+photo facing the other way. That photo is sent with `previous` = the first `photo_id`; the backend adds both
+photos' votes and answers `tier: "picker"`, `p_correct: null` (never a third photo). An expired `previous` (photos
+are kept 10 minutes) falls back to a single-photo answer. Both fields are null from uncalibrated backends; the app
+then uses the old rule (picker below 0.6 or when the top 3 span floors).
 
 ### Unrecognized-photo error
 
