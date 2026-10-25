@@ -35,16 +35,8 @@ export const DEST_GROUPS = [
       { value: 'B1_restrooms', label: 'Restrooms · Lower level' },
     ],
   },
-  {
-    title: 'Classrooms',
-    items: [
-      { value: 'B1_class70', label: '70-seat classroom · Lower level' },
-      { value: 'F1_class24', label: '24-seat classroom · Floor 1' },
-      { value: 'F1_class48', label: '48-seat classroom · Floor 1' },
-      { value: 'F2_class20', label: '20-seat classroom · Floor 2' },
-      { value: 'F2_class48a', label: '48-seat classroom A · Floor 2' },
-    ],
-  },
+  // Classroom choices use physical door-number aliases in Popular above.
+  // Capacity-based internal nodes are not user-facing destinations.
 ]
 
 // Flat list, handy for datalist suggestions and resolution lookups.
@@ -101,7 +93,7 @@ export function resolveDestination(input) {
 // Human-readable header for a destination value, for the Route screen title.
 // "164" -> "Room 164"; "F1_restrooms" -> "Restrooms (Floor 1)". Uses spots.js
 // formatting and never invents names.
-export function destinationLabel(value) {
+export function destinationLabel(value, roomLabels = {}) {
   const raw = String(value || '').trim()
   if (!raw) return ''
   // A verified quick-pick: prefer its curated label (strip the " · floor" tail so
@@ -111,7 +103,7 @@ export function destinationLabel(value) {
   if (/^[a-z]?\d+[a-z]?$/i.test(raw)) return `Room ${raw.toUpperCase()}`
   // A node id we can format with spots.js (e.g. "F1_restrooms").
   if (/^[bf]\d?_/i.test(raw)) {
-    const name = spotName(raw)
+    const name = spotName(raw, roomLabels)
     const floor = floorOf(raw).name
     return floor && !name.includes(floor) ? `${name} (${floor})` : name
   }

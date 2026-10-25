@@ -142,6 +142,7 @@ function Navigation({ api, building, onSchoolChange }) {
           onManual={chooseStart}
           api={api}
           buildingLabel={building.shortName || building.name}
+          roomLabels={building.roomLabels}
         />
       )}
       {screen === 'manual' && (
@@ -154,6 +155,7 @@ function Navigation({ api, building, onSchoolChange }) {
           onRestart={restart}
           api={api}
           resolvePlace={building.resolvePlace}
+          roomLabels={building.roomLabels}
         />
       )}
 

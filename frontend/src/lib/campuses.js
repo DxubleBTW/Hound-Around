@@ -2,6 +2,7 @@
 // private node directory, photos, or credentials belong in this catalog.
 // Add another school only after its separate backend/data package is reviewed.
 import { ALL_DESTS, DEST_GROUPS, resolveDestination } from './destinations.js'
+import { BU_CDS_ROOM_LABELS } from './publicRoomLabels.js'
 
 const passThrough = (input) => String(input || '').trim()
 
@@ -12,6 +13,7 @@ export const CAMPUSES = [{
     apiEnv: 'VITE_API_URL', enabled: true,
     destinations: ALL_DESTS,
     destinationGroups: DEST_GROUPS,
+    roomLabels: BU_CDS_ROOM_LABELS,
     landmarks: [], // Only explicitly approved public landmark IDs may be added.
   }],
 }]
@@ -37,5 +39,6 @@ export function buildingConfig(schoolId, buildingId, env = {}, campuses = CAMPUS
   return { ...building, schoolId, schoolName: school.name, apiBase: base,
     available: building.enabled === true && (base ? validBase(base) : isDefault),
     destinations: building.destinations || [], landmarks: building.landmarks || [],
+    roomLabels: building.roomLabels || {},
     resolvePlace: isDefault ? resolveDestination : passThrough }
 }

@@ -3,7 +3,10 @@ import { test } from 'node:test'
 import { ALL_DESTS, DEST_GROUPS, destinationLabel, resolveDestination } from '../src/lib/destinations.js'
 
 test('every quick-pick is a verified-real value with a label', () => {
-  assert.ok(ALL_DESTS.length >= 14)
+  assert.deepEqual(ALL_DESTS.map((d) => d.value), [
+    '164', 'B62', '262', '263', '264', '265',
+    'F1_restrooms', 'F2_restrooms', 'B1_restrooms',
+  ])
   for (const d of ALL_DESTS) {
     assert.equal(typeof d.value, 'string')
     assert.ok(d.value.length > 0)
