@@ -52,7 +52,8 @@ test('moveLabel gives a plain-language relative move per step kind', () => {
   assert.equal(moveLabel('right'), 'Turn right')
   assert.equal(moveLabel('around'), 'Turn around')
   assert.equal(moveLabel('continue'), 'Keep straight')
-  assert.equal(moveLabel('walk'), 'Keep straight')
+  // No known facing: name the target, never claim "straight".
+  assert.equal(moveLabel('walk'), 'Head toward')
   assert.equal(moveLabel('elevator'), 'Take the elevator')
   assert.equal(moveLabel('elevator', 'Floor 2'), 'Take the elevator to Floor 2')
   assert.equal(moveLabel('stairs', 'Lower level'), 'Take the stairs to Lower level')

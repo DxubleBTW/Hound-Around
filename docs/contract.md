@@ -54,6 +54,11 @@ POST /correct  {"photo_id":"p_8f3a","true_spot":"F2_hall_e1"}  → {"ok":true,"i
 GET /health    → {"ok":true,"index_size":2213,"model":"dinov2-small"}
 ```
 
+Route instructions start with one of: `Walk`, `Continue`, `Turn left and walk`, `Turn right and walk`,
+`Turn around and walk`, `Take the elevator to`, `Take the stairs to`. A turn needs at least 45° (150° for
+"Turn around"); smaller bends merge into the previous step. A destination door beside the corridor ends with
+", on your left" / ", on your right" instead of a turn, and doors passed mid-route never count as turns.
+
 Confidence = winning votes / 10. Below ~0.6, or when the top 3 span floors, the app shows the top-3 picker. `ocr_room` / `ocr_floor` are null when nothing is read.
 
 ### Unrecognized-photo error

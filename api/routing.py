@@ -4,6 +4,16 @@ import re
 
 import networkx as nx
 
+# Door nodes sit a little off the corridor line, so small bends are not turns.
+STRAIGHT_DEGREES = 45
+AROUND_DEGREES = 150
+# A destination door this far off the walking line is "on your left/right".
+SIDE_DEGREES = 15
+
+
+def is_door(node):
+    return node.get('type') == 'room'
+
 
 class Router:
     def __init__(self, graph, rooms):
@@ -95,8 +105,13 @@ class Router:
             else:
                 direction = 'Walk'
                 origin = self.nodes[a]
-                incoming = None
-                if previous is not None:
+                # A door passed mid-route bends the line but is not a turn; the
+                # next turn is measured from the node before the door.
+                passing_door = a != start and is_door(origin)
+                incoming, angle = None, None
+                if passing_door:
+                    direction = 'Continue'
+                elif previous is not None:
                     incoming = (origin['x'] - previous['x'], origin['y'] - previous['y'])
                 elif a == start and heading:
                     facing = self.nodes[heading]
@@ -109,11 +124,16 @@ class Router:
                         incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
                     ))
                     # Walk-sheet y increases downward.
-                    direction = ('Turn around and walk' if abs(angle) >= 150 else
-                                 'Turn right and walk' if angle > 30 else
-                                 'Turn left and walk' if angle < -30 else 'Continue')
+                    direction = ('Turn around and walk' if abs(angle) >= AROUND_DEGREES else
+                                 'Turn right and walk' if angle >= STRAIGHT_DEGREES else
+                                 'Turn left and walk' if angle <= -STRAIGHT_DEGREES else 'Continue')
+                    if b == destination and is_door(target) and SIDE_DEGREES <= abs(angle) < AROUND_DEGREES:
+                        # The door is beside the corridor: say which side, don't turn.
+                        direction = 'Continue'
+                        toward = f"{toward}, on your {'right' if angle > 0 else 'left'}"
                 instruction = f'{direction} toward {toward}'
-                previous = origin
+                if not passing_door:
+                    previous = origin
             if steps and not edge.get('vertical', False) and direction == 'Continue':
                 # Group straight segments into one human turn, unless the
                 # previous step was a floor transition.

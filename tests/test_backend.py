@@ -253,6 +253,36 @@ def test_group_straight_segments_and_heading():
     assert reverse['steps'][0]['instruction'].startswith('Turn around')
 
 
+def test_turn_wording_shallow_bends_and_doors():
+    graph = {'nodes': [
+        {'id': 'synthetic_a', 'floor': 1, 'x': 0, 'y': 0, 'label': 'A'},
+        {'id': 'synthetic_b', 'floor': 1, 'x': 10, 'y': 0, 'label': 'B'},
+        # 35 degrees off the corridor line: a bend, not a turn.
+        {'id': 'synthetic_c', 'floor': 1, 'x': 20, 'y': 7, 'label': 'C'},
+        {'id': 'synthetic_d', 'floor': 1, 'x': 20, 'y': 17, 'label': 'D'},
+        # A door just beside the corridor.
+        {'id': 'synthetic_door', 'floor': 1, 'x': 14, 'y': 3, 'label': 'Door', 'type': 'room'},
+        {'id': 'synthetic_far', 'floor': 1, 'x': 22, 'y': -2, 'label': 'Far'},
+    ], 'edges': [
+        {'from': 'synthetic_a', 'to': 'synthetic_b', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_c', 'meters': 12},
+        {'from': 'synthetic_c', 'to': 'synthetic_d', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_door', 'meters': 5},
+        {'from': 'synthetic_door', 'to': 'synthetic_far', 'meters': 9},
+    ]}
+    routes = Router(graph, [])
+    bend = routes.route('synthetic_a', 'synthetic_c')
+    assert [s['instruction'] for s in bend['steps']] == ['Walk toward C']
+    turn = routes.route('synthetic_a', 'synthetic_d')
+    assert turn['steps'][-1]['instruction'] == 'Turn right and walk toward D'
+    door = routes.route('synthetic_a', 'synthetic_door')
+    assert door['steps'] == [{'instruction': 'Walk toward Door, on your right',
+                              'meters': 15, 'node': 'synthetic_door'}]
+    # Passing through a door node never reads as a turn.
+    through = routes.route('synthetic_a', 'synthetic_far')
+    assert [s['instruction'] for s in through['steps']] == ['Walk toward Far']
+
+
 def test_one_way_edge():
     graph = {'nodes': [{'id': 'synthetic_a', 'floor': 1, 'x': 0, 'y': 0},
                        {'id': 'synthetic_b', 'floor': 1, 'x': 1, 'y': 0}],

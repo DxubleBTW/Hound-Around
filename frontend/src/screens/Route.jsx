@@ -203,12 +203,14 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
     } else {
       move = kind ? moveLabel(kind) : ''
       const toward = prettifyLandmark(headingToward(step.instruction), roomLabels[step.node])
-      detail = toward ? `toward ${lowerFirst(toward)}` : prettifyLandmark(step.instruction, roomLabels[step.node])
+      // "Head toward" already ends in "toward": the landmark is the whole detail.
+      detail = toward ? (kind === 'walk' ? toward : `toward ${lowerFirst(toward)}`) : prettifyLandmark(step.instruction, roomLabels[step.node])
     }
   }
   const nextStep = steps[i + 1]
   const nextKind = nextStep ? stepKind(nextStep.instruction) : null
   const nextToward = nextStep ? prettifyLandmark(headingToward(nextStep.instruction), roomLabels[nextStep.node]) : ''
+  const nextJoin = nextKind === 'walk' ? ' ' : ' toward '
   const last = i === steps.length - 1
   const meters = step?.meters > 0 ? Math.max(1, Math.round(step.meters)) : 0
   const tapHint = last ? 'Tap when you arrive' : vertical ? 'Tap when you’re out' : 'Tap when you’re there'
@@ -253,7 +255,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
           {nextStep && (
             <p className="flex items-center gap-3 text-base">
               <TurnIcon kind={nextKind} />
-              <span><span className="text-mist">Then </span>{lowerFirst(moveLabel(nextKind))}{nextToward ? ` toward ${lowerFirst(nextToward)}` : ''}</span>
+              <span><span className="text-mist">Then </span>{lowerFirst(moveLabel(nextKind))}{nextToward ? `${nextJoin}${lowerFirst(nextToward)}` : ''}</span>
             </p>
           )}
         </>
@@ -318,7 +320,7 @@ function DirectionArrow({ kind, dir = '', aria = '' }) {
   const nudge = {
     left: { '--nudge-x': '-4px' }, right: { '--nudge-x': '4px' },
     up: { '--nudge-y': '-4px' }, down: { '--nudge-y': '4px' },
-    continue: { '--nudge-y': '-4px' }, walk: { '--nudge-y': '-4px' },
+    continue: { '--nudge-y': '-4px' },
     around: { '--nudge-y': '-3px' },
   }[arrowKind] || {}
   return (
@@ -349,8 +351,10 @@ function glyph(kind) {
       return <><path d="M10 20V11a4 4 0 0 1 4-4h5" /><path d="M16 4l3 3-3 3" /></>
     case 'around':
       return <><path d="M9 20V10a4 4 0 0 1 8 0v4" /><path d="M6 11l3 3 3-3" /></>
-    case 'continue':
     case 'walk':
+      // Facing unknown: a target, not a straight-ahead arrow.
+      return <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" /></>
+    case 'continue':
     case 'up':
       return <><path d="M12 20V5" /><path d="M6 11l6-6 6 6" /></>
     case 'down':
