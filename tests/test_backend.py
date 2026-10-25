@@ -137,7 +137,9 @@ def test_route_legs_one_per_floor(router):
     stairs = router.route('test_entry', 'test_room')['legs']
     assert stairs[0]['exit'] == {'mode': 'stairs', 'to_floor': 2}
     assert router.route('test_entry', 'test_entry')['legs'] == [
-        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]
+        {'floor': 1, 'points': [[0.5, 0.5]], 'nodes': ['test_entry'],
+         'branches': [[{'dx': 1.0, 'dy': 0.0, 'kind': 'hall'}]],
+         'start': 'test_entry', 'end': 'test_entry', 'exit': None}]
 
 
 def test_route_legs_ride_through_floors():
@@ -172,7 +174,9 @@ def test_route_errors_and_same_spot(backend):
                                        'heading': 'test_room'}).status_code == 422
     same = client.get('/route', params={'from': 'test_entry', 'to': 'test_entry'}).json()
     assert same == {'steps': [], 'total_meters': 0.0, 'est_seconds': 0, 'legs': [
-        {'floor': 1, 'points': [[0.5, 0.5]], 'start': 'test_entry', 'end': 'test_entry', 'exit': None}]}
+        {'floor': 1, 'points': [[0.5, 0.5]], 'nodes': ['test_entry'],
+         'branches': [[{'dx': 1.0, 'dy': 0.0, 'kind': 'hall'}]],
+         'start': 'test_entry', 'end': 'test_entry', 'exit': None}]}
 
 
 def test_correction_logging_replay_and_rollback(backend):
@@ -295,7 +299,7 @@ def test_group_straight_segments_and_heading():
     routes = Router(graph, [])
     result = routes.route('synthetic_a', 'synthetic_c', heading='synthetic_n')
     assert result['steps'] == [{'instruction': 'Turn right and walk toward C',
-                               'meters': 20, 'node': 'synthetic_c'}]
+                               'meters': 20, 'node': 'synthetic_c', 'passes': []}]
     reverse = routes.route('synthetic_b', 'synthetic_a', heading='synthetic_c')
     assert reverse['steps'][0]['instruction'].startswith('Turn around')
 
@@ -324,7 +328,7 @@ def test_turn_wording_shallow_bends_and_doors():
     assert turn['steps'][-1]['instruction'] == 'Turn right and walk toward D'
     door = routes.route('synthetic_a', 'synthetic_door')
     assert door['steps'] == [{'instruction': 'Walk toward Door, on your right',
-                              'meters': 15, 'node': 'synthetic_door'}]
+                              'meters': 15, 'node': 'synthetic_door', 'passes': []}]
     # Passing through a door node never reads as a turn.
     through = routes.route('synthetic_a', 'synthetic_far')
     assert [s['instruction'] for s in through['steps']] == ['Walk toward Far']
@@ -384,3 +388,54 @@ def test_inference_does_not_block_request_middleware(backend, monkeypatch):
         finally:
             release.set()
         assert matching.result(timeout=2).status_code == 200
+
+
+def test_directions_name_landmarks_passed_and_where_to_step_out():
+    graph = {'nodes': [
+        {'id': 'synthetic_a', 'floor': 1, 'x': 0, 'y': 0, 'type': 'hallway', 'short': 'the west hallway'},
+        {'id': 'synthetic_b', 'floor': 1, 'x': 10, 'y': 0, 'type': 'hallway'},
+        {'id': 'synthetic_c', 'floor': 1, 'x': 20, 'y': 0, 'type': 'hallway'},
+        # Beside the hallway at B: restrooms below the line (right, y grows down), stairs above (left).
+        {'id': 'synthetic_wc', 'floor': 1, 'x': 10, 'y': 4, 'type': 'room', 'short': 'the restrooms'},
+        {'id': 'synthetic_st', 'floor': 1, 'x': 10, 'y': -4, 'type': 'stairs', 'short': 'the main stairs'},
+        {'id': 'synthetic_lift', 'floor': 1, 'x': 20, 'y': 5, 'type': 'elevator', 'short': 'the elevators'},
+        {'id': 'synthetic_up', 'floor': 2, 'x': 20, 'y': 5, 'type': 'elevator', 'short': 'the elevators'},
+        {'id': 'synthetic_hall2', 'floor': 2, 'x': 20, 'y': 12, 'type': 'hallway', 'short': 'the upper hallway'},
+    ], 'edges': [
+        {'from': 'synthetic_a', 'to': 'synthetic_b', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_c', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_wc', 'meters': 3},
+        {'from': 'synthetic_b', 'to': 'synthetic_st', 'meters': 3},
+        {'from': 'synthetic_c', 'to': 'synthetic_lift', 'meters': 4},
+        {'from': 'synthetic_lift', 'to': 'synthetic_up', 'meters': 0, 'vertical': True},
+        {'from': 'synthetic_up', 'to': 'synthetic_hall2', 'meters': 6},
+    ]}
+    result = Router(graph, []).route('synthetic_a', 'synthetic_hall2')
+    walk = result['steps'][0]
+    assert walk['node'] == 'synthetic_c'
+    assert walk['passes'] == [{'name': 'the main stairs', 'side': 'left'},
+                              {'name': 'the restrooms', 'side': 'right'}]
+    ride = next(s for s in result['steps'] if s['instruction'].startswith('Take the elevator'))
+    # Name where you step out to, not the elevator you're already in.
+    assert ride['instruction'] == 'Take the elevator to 2, then head toward the upper hallway'
+    assert ride['passes'] == []
+
+
+def test_legs_carry_branch_directions_only():
+    graph = {'nodes': [
+        {'id': 'synthetic_a', 'floor': 1, 'x': 0, 'y': 0},
+        {'id': 'synthetic_b', 'floor': 1, 'x': 10, 'y': 0},
+        {'id': 'synthetic_c', 'floor': 1, 'x': 20, 'y': 0},
+        {'id': 'synthetic_side', 'floor': 1, 'x': 10, 'y': 30, 'type': 'hallway'},
+        {'id': 'synthetic_door', 'floor': 1, 'x': 10, 'y': -2, 'type': 'room'},
+    ], 'edges': [
+        {'from': 'synthetic_a', 'to': 'synthetic_b', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_c', 'meters': 10},
+        {'from': 'synthetic_b', 'to': 'synthetic_side', 'meters': 30},
+        {'from': 'synthetic_b', 'to': 'synthetic_door', 'meters': 2},
+    ]}
+    leg = Router(graph, []).route('synthetic_a', 'synthetic_c')['legs'][0]
+    assert leg['nodes'] == ['synthetic_a', 'synthetic_b', 'synthetic_c']
+    # A unit direction and a kind per opening: never the far node's position or name.
+    assert leg['branches'] == [[], [{'dx': 0.0, 'dy': -1.0, 'kind': 'door'},
+                                     {'dx': 0.0, 'dy': 1.0, 'kind': 'hall'}], []]

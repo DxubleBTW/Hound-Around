@@ -11,8 +11,23 @@ AROUND_DEGREES = 150
 SIDE_DEGREES = 15
 
 
+# Landmarks worth naming as you walk past them ("pass the restrooms on your left").
+LANDMARK_TYPES = ('room', 'stairs', 'elevator', 'entrance')
+MAX_PASSES = 3
+
+
 def is_door(node):
     return node.get('type') == 'room'
+
+
+def side_of(direction, offset):
+    """'left' / 'right' of a walking direction, or None when roughly ahead or behind.
+    Walk-sheet y increases downward, so a positive cross product is to the right."""
+    cross = direction[0] * offset[1] - direction[1] * offset[0]
+    angle = abs(math.degrees(math.atan2(cross, direction[0] * offset[0] + direction[1] * offset[1])))
+    if angle < 30 or angle > 150:
+        return None
+    return 'right' if cross > 0 else 'left'
 
 
 class Router:
@@ -61,6 +76,9 @@ class Router:
         numbers = self.room_numbers.get(node['id'], set())
         if len(numbers) == 1:
             return f'Room {next(iter(numbers))}'
+        if node.get('short'):
+            # Plain-language name from the private graph patch ("the main stairs").
+            return node['short']
         if re.search(r'_class\d+[a-z]?$', node['id']):
             return 'Classroom (room number unconfirmed)'
         label = node.get('label', node['id'])
@@ -100,7 +118,8 @@ class Router:
             if edge.get('vertical', False):
                 level = 'LL' if target['floor'] == -1 else str(target['floor'])
                 mode = 'stairs' if edge.get('stairs', False) else 'elevator'
-                instruction = f'Take the {mode} to {level}, toward {toward}'
+                out = self._step_out(path, b, graph)
+                instruction = f'Take the {mode} to {level}, then head toward {self.node_label(out)}'
                 previous = None
             else:
                 direction = 'Walk'
@@ -141,14 +160,48 @@ class Router:
                     steps[-1]['instruction'] = steps[-1]['instruction'].rsplit(' toward ', 1)[0] + f' toward {toward}'
                     steps[-1]['meters'] += edge['meters']
                     steps[-1]['node'] = b
+                    steps[-1]['_path'].append(b)
                 else:
-                    steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b})
+                    steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b, '_path': [a, b]})
             else:
-                steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b})
+                steps.append({'instruction': instruction, 'meters': edge['meters'], 'node': b,
+                              '_path': [a, b], '_vertical': edge.get('vertical', False)})
             total += edge['meters']
+        on_path = set(path)
+        for step in steps:
+            walked = step.pop('_path')
+            step['passes'] = [] if step.pop('_vertical', False) else self._passes(walked, on_path, graph)
         return {'steps': steps, 'total_meters': total,
                 'est_seconds': math.ceil(total / (0.9 if accessible else 1.2)),
                 'legs': self.legs(path, graph)}
+
+    def _step_out(self, path, node, graph):
+        """After riding up or down (maybe through several floors), the first
+        place you walk toward on the new floor."""
+        i = path.index(node)
+        while i + 1 < len(path) and graph[path[i]][path[i + 1]].get('vertical', False):
+            i += 1
+        return self.nodes[path[i + 1]] if i + 1 < len(path) else self.nodes[path[i]]
+
+    def _passes(self, walked, on_path, graph):
+        """Landmarks beside the hallway while walking a step, in walking order:
+        doors, stairs, elevators and entrances one edge off the path, with the
+        side they're on. Where you start and where the step ends are left out."""
+        out, seen = [], set()
+        for i in range(1, len(walked) - 1):
+            here, before = self.nodes[walked[i]], self.nodes[walked[i - 1]]
+            heading = (here['x'] - before['x'], here['y'] - before['y'])
+            for other in sorted(graph.successors(walked[i])):
+                node = self.nodes[other]
+                if (other in on_path or graph[walked[i]][other].get('vertical', False)
+                        or node.get('type') not in LANDMARK_TYPES):
+                    continue
+                side = side_of(heading, (node['x'] - here['x'], node['y'] - here['y']))
+                name = self.node_label(node)
+                if side and name not in seen:
+                    seen.add(name)
+                    out.append({'name': name, 'side': side})
+        return out[:MAX_PASSES]
 
     def legs(self, path, graph):
         """One drawable leg per floor. Points are normalized to each leg's own
@@ -167,12 +220,12 @@ class Router:
                 # (LL -> 1 -> 2) is one move, not a one-point leg.
                 legs[-1]['exit'] = exit
             else:
-                legs.append(self._leg(run, exit))
+                legs.append(self._leg(run, exit, graph))
             run = [b]
-        legs.append(self._leg(run, None))
+        legs.append(self._leg(run, None, graph))
         return legs
 
-    def _leg(self, run, exit):
+    def _leg(self, run, exit, graph):
         xs = [self.nodes[n]['x'] for n in run]
         ys = [self.nodes[n]['y'] for n in run]
         span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
@@ -181,5 +234,25 @@ class Router:
         oy = (1 - 0.8 * (max(ys) - min(ys)) / span) / 2
         points = [[round(ox + 0.8 * (x - min(xs)) / span, 3),
                    round(oy + 0.8 * (y - min(ys)) / span, 3)] for x, y in zip(xs, ys)]
-        return {'floor': self.nodes[run[0]]['floor'], 'points': points,
+        return {'floor': self.nodes[run[0]]['floor'], 'points': points, 'nodes': list(run),
+                'branches': [self._branches(n, run, graph) for n in run],
                 'start': run[0], 'end': run[-1], 'exit': exit}
+
+    def _branches(self, node_id, run, graph):
+        """Openings beside the path at one point, for drawing hallway walls:
+        unit directions only (no lengths, names or positions), so the client can
+        draw a short stub where another hallway or door meets the path without
+        learning anything past it."""
+        here, out = self.nodes[node_id], []
+        for other in sorted(graph.successors(node_id)):
+            if other in run or graph[node_id][other].get('vertical', False):
+                continue
+            node = self.nodes[other]
+            dx, dy = node['x'] - here['x'], node['y'] - here['y']
+            length = math.hypot(dx, dy)
+            if not length:
+                continue
+            kind = node.get('type')
+            kind = 'door' if kind == 'room' else kind if kind in ('stairs', 'elevator', 'entrance') else 'hall'
+            out.append({'dx': round(dx / length, 3), 'dy': round(dy / length, 3), 'kind': kind})
+        return out

@@ -27,6 +27,10 @@ def main():
     g = json.loads(args.graph.read_text())
     patch = json.loads(args.patch.read_text())
     g["nodes"] = [n for n in g["nodes"] if n["floor"] in FLOORS] + patch.get("add_nodes", [])
+    # "short_labels": {node id: plain-language name}, used in spoken-style directions ("the main stairs").
+    for n in g["nodes"]:
+        if n["id"] in patch.get("short_labels", {}):
+            n["short"] = patch["short_labels"][n["id"]]
     ids = {n["id"] for n in g["nodes"]}
     # "remove_edges" replaces a walk-sheet edge, e.g. when a corridor gets a new waypoint in the middle.
     removed = {frozenset(pair) for pair in patch.get("remove_edges", [])}

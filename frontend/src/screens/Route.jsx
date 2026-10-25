@@ -5,7 +5,7 @@ import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
 import { compactSteps } from '../lib/steps.js'
-import { exitLabel, stepsByLeg, usableLegs } from '../lib/legs.js'
+import { exitLabel, passesText, stepsByLeg, turnMarks, usableLegs } from '../lib/legs.js'
 import PawBurst from '../components/PawBurst.jsx'
 import RoutePath from '../components/RoutePath.jsx'
 import Icon from '../components/Icon.jsx'
@@ -201,6 +201,9 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
   let legIndex = 0
   if (groups) { let seen = 0; legIndex = groups.findIndex((g) => (seen += g.length) > i); if (legIndex < 0) legIndex = groups.length - 1 }
   const leg = groups ? legs[legIndex] : null
+  // Turn numbers on the map match the step numbers in the timeline below.
+  const legStart = groups ? groups.slice(0, legIndex).flat().length : 0
+  const marks = leg ? turnMarks(leg, groups[legIndex], stepKind).map((m) => ({ ...m, n: m.n + legStart })) : []
 
   if (arrived) {
     return (
@@ -277,6 +280,7 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
           <span className="block text-[11px] font-semibold uppercase tracking-wide text-ink/50">Now · step {i + 1} of {steps.length}</span>
           <span className="font-display block text-[23px] font-bold leading-tight text-ink">{move}</span>
           {detail && <span className="block text-[14px] leading-snug text-ink/65">{detail}</span>}
+          {passesText(step.passes) && <span className="mt-0.5 block text-[13px] leading-snug text-ink/55">{passesText(step.passes)}</span>}
         </span>
         {step.meters > 0 && <span className="shrink-0 text-[16px] font-bold tabular-nums text-ink">{Math.max(1, Math.round(step.meters))} m</span>}
       </button>
@@ -298,7 +302,7 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
             {legs.length > 1 && <p className="text-[13px] text-dim">Part {legIndex + 1} of {legs.length}</p>}
           </div>
           <div className="mt-3 flex justify-center">
-            <RoutePath points={leg.points} exitMode={leg.exit?.mode} endLabel={(destText.match(/\b(B?\d{2,3}[A-Z]?)\b/) || [])[1] || ''}
+            <RoutePath leg={leg} marks={marks} exitMode={leg.exit?.mode} endLabel={(destText.match(/\b(B?\d{2,3}[A-Z]?)\b/) || [])[1] || ''}
               label={leg.exit
                 ? `Your path on ${floorName(leg.floor)}, from you to the ${leg.exit.mode === 'stairs' ? 'stairs' : 'elevator'}.`
                 : `Your path on ${floorName(leg.floor)}, from you to ${destText}.`} />
@@ -313,7 +317,7 @@ export default function Route({ from, heading, photo = null, dest, accessible, o
       {/* The whole trip as a timeline, markers down the left. */}
       <ol className="mt-5" aria-label="Directions">
         {[{ marker: 'Start', title: fromText, sub: 'Where you are now', icon: 'pin', state: 'done' },
-          ...steps.map((st, k) => { const l = label(st); return { marker: String(k + 1), title: l.title, sub: [l.sub, st.meters > 0 ? `${Math.max(1, Math.round(st.meters))} m` : ''].filter(Boolean).join(' · '), glyphKind: l.kd, k, state: k < i ? 'done' : k === i ? 'now' : 'next' } }),
+          ...steps.map((st, k) => { const l = label(st); return { marker: String(k + 1), title: l.title, sub: [l.sub, passesText(st.passes), st.meters > 0 ? `${Math.max(1, Math.round(st.meters))} m` : ''].filter(Boolean).join(' · '), glyphKind: l.kd, k, state: k < i ? 'done' : k === i ? 'now' : 'next' } }),
           { marker: 'End', title: destText, sub: floorsOnRoute[floorsOnRoute.length - 1] || '', icon: 'flag', state: 'next' }]
           .map((row, n, all) => (
           <li key={n} className="flex gap-3">
