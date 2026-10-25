@@ -4,6 +4,7 @@ import { floorName, floorOf, spotName } from '../lib/spots.js'
 import { destinationLabel, resolveDestination } from '../lib/destinations.js'
 import { arrowAria, moveLabel, prettifyLandmark } from '../lib/directions.js'
 import { prefersReducedMotion, tick } from '../lib/motion.js'
+import { compactSteps } from '../lib/steps.js'
 import PawBurst from '../components/PawBurst.jsx'
 import { ElevatorIcon } from '../components/Paw.jsx'
 
@@ -171,7 +172,7 @@ export default function Route({ from, heading, dest, accessible, onRestart, api,
     )
   }
 
-  const steps = data.steps || []
+  const steps = compactSteps(data.steps || [], stepKind)
   const arrived = i >= steps.length
   const step = steps[i]
   const kind = step ? stepKind(step.instruction) : null

@@ -197,7 +197,7 @@ function Navigation({ api, building, motion, onSchoolChange }) {
       </div>
 
       {toast && (
-        <div role="status" className="toast-in fixed inset-x-5 bottom-[max(1.5rem,env(safe-area-inset-bottom))] mx-auto flex max-w-sm items-center gap-3 rounded-sm bg-panel px-4 py-3.5 text-left">
+        <div role="status" className="toast-in fixed inset-x-5 top-[max(1rem,env(safe-area-inset-top))] z-40 mx-auto flex max-w-sm items-center gap-3 rounded-sm bg-panel px-4 py-3.5 text-left">
           {toast.celebrate && <PawBurst size={34} className="shrink-0" />}
           <span className="flex-1">
             <span className="block font-display text-[17px] font-semibold leading-tight">{toast.msg}</span>

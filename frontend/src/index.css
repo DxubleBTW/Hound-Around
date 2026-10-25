@@ -73,7 +73,7 @@ body {
 .ride { animation: ride 1.8s var(--ease-out-soft) infinite; }
 @keyframes grow-x { from { transform: scaleX(0) } to { transform: scaleX(1) } }
 .grow-x { transform-origin: left; animation: grow-x 520ms var(--ease-out-soft) both; }
-@keyframes toast-in { from { opacity: 0; transform: translateY(16px) } to { opacity: 1; transform: none } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-12px) } to { opacity: 1; transform: none } }
 .toast-in { animation: toast-in 320ms var(--ease-out-soft) both; }
 
 /* The "it learned" paw. */
