@@ -76,6 +76,14 @@ function mockRoute({ from, to, accessible }, signal) {
         { instruction: 'Walk toward the tower elevators', meters: 12, node: 'F1_core_elev' },
         { instruction: `Turn left and walk toward ${to}`, meters: 15, node: 'F1_room164' },
       ]
+  // Made-up shapes, one per floor, so the drawn route works without the backend.
+  const legs = from.startsWith('F2')
+    ? [
+        { floor: 2, points: [[0.9, 0.3], [0.5, 0.3], [0.1, 0.3]], start: from, end: 'F2_podium_elev',
+          exit: { mode: accessible ? 'elevator' : 'stairs', to_floor: 1 } },
+        { floor: 1, points: [[0.1, 0.1], [0.1, 0.6], [0.5, 0.9]], start: 'F1_podium_elev', end: 'F1_room164', exit: null },
+      ]
+    : [{ floor: 1, points: [[0.1, 0.9], [0.1, 0.45], [0.9, 0.45]], start: from, end: 'F1_room164', exit: null }]
   const total = steps.reduce((a, s) => a + s.meters, 0)
-  return delay(400, { steps, total_meters: total, est_seconds: Math.round(total / 1.2) }, signal)
+  return delay(400, { steps, total_meters: total, est_seconds: Math.round(total / 1.2), legs }, signal)
 }
