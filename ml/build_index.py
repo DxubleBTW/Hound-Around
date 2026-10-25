@@ -5,7 +5,7 @@ Reads every ``<data_dir>/<dataset>/labels.csv`` the pipeline wrote (frames in
 pairs with ``<data_dir>/dataset/train``), keeps ``status == keep``, embeds, and writes
 ``<data_dir>/index.npz`` in the contract format:
 
-- ``vecs`` float16 ``[N, 384]`` (L2-normalized)
+- ``vecs`` float16 ``[N, D]`` (L2-normalized; D follows the embedder, or ``--pca K``)
 - ``labels`` str ``[N]``
 - ``source`` str ``[N]`` = ``"video"``
 - ``heading`` str ``[N]``: graph node the frame faces, ``''`` when unknown (optional; older indexes lack it).
@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ml.embedder import DIM, INDEX_VIEWS, index_views, normalize
+from ml.embedder import INDEX_VIEWS, Projector, index_views, normalize
 
 CAP_PER_SPOT = 250
 # 360-camera views (datasets named *360*) get their own budget on top of the phone frames. Sharing the cap let
@@ -115,47 +115,64 @@ def keep_frames(data_dir, exclude_videos=()):
     return by_spot
 
 
-def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None):
+def build_index(data_dir, embed_fn=None, cap=CAP_PER_SPOT, exclude_videos=(), out_path=None, pca=None):
     """Build and return ``(VectorIndex-like arrays)`` and write ``index.npz``.
 
     Returns ``(path, counts)`` where ``counts`` maps spot -> frames indexed
     (each frame is ``len(INDEX_VIEWS)`` rows).
-    ``embed_fn`` is injectable (fake in tests); defaults to DINOv2.
+    ``embed_fn`` is injectable (fake in tests); defaults to the embedder named by
+    ``HOUND_EMBEDDER`` (:func:`ml.embedder.make_embedder`). ``pca=K`` fits a PCA
+    on the full-width rows, stores the K-d rows and saves the projection inside
+    the same ``index.npz`` (the backend applies it to every query).
     """
     data_dir = Path(data_dir)
     graph = json.loads((data_dir / 'graph.json').read_text())
     valid_nodes = {n['id'] for n in graph.get('nodes', []) if n.get('floor') in VALID_FLOORS}
 
     if embed_fn is None:
-        from ml.embedder import Dinov2Embedder  # lazy heavy import
-        embed_fn = Dinov2Embedder()
+        from ml.embedder import make_embedder  # lazy heavy import
+        embed_fn = make_embedder()
 
     headings = frame_headings(data_dir)
+    view_spec = getattr(embed_fn, 'index_views', INDEX_VIEWS)
     vecs_parts, labels, row_headings, counts = [], [], [], {}
+    dim = getattr(embed_fn, 'dim', None)
     for spot, frames in index_frames(data_dir, valid_nodes, cap, exclude_videos):
         images = [Image.open(f).convert('RGB') for f in frames]
         try:
-            views = [view for image in images for view in index_views(image)]
-            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(-1, DIM)
+            views = [view for image in images for view in index_views(image, view_spec)]
+            vectors = np.asarray(embed_fn(views), dtype=np.float32).reshape(len(views), -1)
+            if dim is None:
+                dim = vectors.shape[1]
+            elif vectors.shape[1] != dim:
+                raise ValueError(f'Embedder returned {vectors.shape[1]}-d rows, expected {dim}-d')
         finally:
             for image in images:
                 image.close()
         vecs_parts.append(normalize(vectors))
         labels.extend([spot] * vectors.shape[0])
-        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in view_spec)
         counts[spot] = len(frames)
 
+    projector = None
+    if vecs_parts and pca:
+        full = np.vstack(vecs_parts)
+        projector = Projector.fit(full, int(pca))
+        vecs_parts = [projector(full)]
+        print(f'PCA {projector.in_dim} -> {projector.out_dim} stored in the index')
     vecs = np.vstack(vecs_parts).astype(np.float16) if vecs_parts \
-        else np.zeros((0, DIM), dtype=np.float16)
+        else np.zeros((0, dim or 0), dtype=np.float16)
     source = np.asarray(['video'] * len(labels), dtype='U') if labels \
         else np.zeros((0,), dtype='U1')
     labels_arr = np.asarray(labels, dtype='U') if labels else np.zeros((0,), dtype='U1')
     heading_arr = np.asarray(row_headings, dtype='U') if labels else np.zeros((0,), dtype='U1')
 
     out_path = Path(out_path) if out_path else data_dir / 'index.npz'
-    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr)
+    extra = projector.npz_fields() if projector is not None else {}
+    np.savez(out_path, vecs=vecs, labels=labels_arr, source=source, heading=heading_arr,
+             views_per_frame=len(view_spec), model_name=getattr(embed_fn, 'model_name', ''), **extra)
 
-    _report(counts)
+    _report(counts, views_per_frame=len(view_spec))
     return out_path, counts
 
 
@@ -198,11 +215,12 @@ def add_headings(data_dir, index_path=None, cap=CAP_PER_SPOT):
     graph = json.loads((data_dir / 'graph.json').read_text())
     valid_nodes = {n['id'] for n in graph.get('nodes', []) if n.get('floor') in VALID_FLOORS}
     headings = frame_headings(data_dir)
+    data = dict(np.load(index_path, allow_pickle=False))
+    views_per_frame = int(data.get('views_per_frame', len(INDEX_VIEWS)))
     labels, row_headings = [], []
     for spot, frames in index_frames(data_dir, valid_nodes, cap):
-        labels.extend([spot] * len(frames) * len(INDEX_VIEWS))
-        row_headings.extend(headings.get(str(f), '') for f in frames for _ in INDEX_VIEWS)
-    data = dict(np.load(index_path, allow_pickle=False))
+        labels.extend([spot] * len(frames) * views_per_frame)
+        row_headings.extend(headings.get(str(f), '') for f in frames for _ in range(views_per_frame))
     if [str(x) for x in data['labels']] != labels:
         raise ValueError('Index rows do not match the manifests; rebuild the index instead')
     data['heading'] = np.asarray(row_headings, dtype='U')
@@ -212,13 +230,13 @@ def add_headings(data_dir, index_path=None, cap=CAP_PER_SPOT):
     return index_path
 
 
-def _report(counts):
+def _report(counts, views_per_frame=len(INDEX_VIEWS)):
     print('Per-spot frame counts:')
     for spot in sorted(counts):
         print(f'  {spot}: {counts[spot]}')
     refilm = sorted(s for s, c in counts.items() if c < REFILM_THRESHOLD)
     total = sum(counts.values())
-    print(f'Total frames indexed: {total} ({total * len(INDEX_VIEWS)} rows) across {len(counts)} spots')
+    print(f'Total frames indexed: {total} ({total * views_per_frame} rows) across {len(counts)} spots')
     if refilm:
         print(f'Re-film list (< {REFILM_THRESHOLD} frames): {", ".join(refilm)}')
     else:
@@ -230,4 +248,9 @@ if __name__ == '__main__':  # pragma: no cover - CLI, human-blocked on real data
     import sys
 
     data = Path(os.getenv('HOUND_DATA_DIR', 'data'))
-    add_headings(data) if '--add-headings' in sys.argv else build_index(data)
+    if '--add-headings' in sys.argv:
+        add_headings(data)
+    else:
+        # python -m ml.build_index [--pca K]   (embedder from HOUND_EMBEDDER)
+        pca = int(sys.argv[sys.argv.index('--pca') + 1]) if '--pca' in sys.argv else None
+        build_index(data, pca=pca)

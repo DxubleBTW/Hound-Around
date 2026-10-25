@@ -23,6 +23,10 @@ Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it befo
 1. `api/main.py`: EXIF-rotate → RGB → thumbnail 512 → `ml/backend.py` `Backend.locate`.
 2. `ml/embedder.py`: DINOv2-small CLS, 384-d, L2-normalized, letterboxed to 224×224 (no center crop).
    `MODEL_NAME` changes when preprocessing changes; it invalidates recognition.json and the correction context.
+   `HOUND_EMBEDDER=megaloc` switches to MegaLoc (8,448-d, **square resize** to 322×322, `squash()`); the index
+   width is read from `index.npz` (`index.dim`, `backend.dim`), never assumed, and the backend refuses to start if
+   the embedder and index disagree. `python -m ml.build_index --pca 1024` stores a PCA inside the index and the
+   backend applies it to every query (`model_name` gains `+pca1024`).
 3. Index (`ml/build_index.py`): up to 250 phone frames per spot (40 for 360 clips), each stored as whole + left +
    right crops, plus a per-row `heading` array (the direction the matched frames face).
 4. `ml/index.py` vote: cosine top-10; a correction that is the #1 neighbor wins.
@@ -67,5 +71,9 @@ Current state, live links, accuracy and open tasks: docs/STATUS.md. Read it befo
   `calibrate.py`). Report top-1 / top-3 / floor and n on the same query set as the baseline.
 - These numbers describe our own footage; outsider photos are the presentable test set. Never tune on them.
   Slides and video use measured numbers only.
-- Next model step: MegaLoc (place-recognition descriptor) beat DINOv2 on the same query set (top-3 75% vs 60%);
-  switching needs a smaller index (cap or PCA), a CPU latency check, a rebuilt index and a calibration refit.
+- MegaLoc is deployed (see the latest section of docs/STATUS.md). It beat DINOv2 on the same query set (n=1758, LOVO:
+  top-1 36.8 → 48.2%, top-3 59.5 → 74.9%, floor 81.2 → 89.4%). Production uses pinned code/weights,
+  square whole-image single views, full-width descriptors, and its own confidence calibration.
+  The Space Dockerfile selects MegaLoc and pins the private data revision; repository defaults still allow DINOv2.
+  Refit calibration before enabling any PCA variant. Four live confident matches took 626–733 ms;
+  OCR fallback latency and independent-user accuracy remain separate checks.

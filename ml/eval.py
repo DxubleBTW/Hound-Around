@@ -639,11 +639,11 @@ def _build_real_backend(data_dir, exclude_videos=()):
     import tempfile
 
     from ml.build_index import build_index, keep_frames
-    from ml.embedder import Dinov2Embedder
+    from ml.embedder import make_embedder
 
     held = {f for frames in keep_frames(data_dir).values() for f in frames} - \
         {f for frames in keep_frames(data_dir, exclude_videos).values() for f in frames}
-    embedder = Dinov2Embedder()
+    embedder = make_embedder()
     eval_index = Path(tempfile.mkdtemp()) / 'index_eval.npz'
     build_index(data_dir, embed_fn=embedder, exclude_videos=exclude_videos, out_path=eval_index)
     if not held:

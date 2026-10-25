@@ -100,8 +100,15 @@ See [feature setup](navigation-features-proposal.md) for cutoff calibration and 
 ## index.npz and corrections.sqlite
 
 ```
-index.npz:  vecs float16 [N,384] (L2-normalized), labels str [N], source str [N] ("video"|"correction")
+index.npz:  vecs float16 [N,D] (L2-normalized), labels str [N], source str [N] ("video"|"correction")
+            heading str [N], model_name scalar str, views_per_frame scalar int
+            optional pca_mean float32 [D0], pca_components float32 [D,D0]
 corrections(photo_id TEXT PRIMARY KEY, true_spot TEXT, predicted TEXT, confidence REAL, created_at TEXT)
 ```
 
 Only vectors and labels ship to the Space, never photos.
+
+D is 384 for DINOv2-small, 8448 for MegaLoc, or the stored PCA output width.
+MegaLoc uses one square-resized whole-image view; DINOv2 uses three views.
+Legacy indexes may omit heading and descriptor metadata. New indexes identify the
+exact pinned descriptor, and the backend rejects a different configured identity.

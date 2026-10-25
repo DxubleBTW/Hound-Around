@@ -146,7 +146,7 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
         try:
             model, routes = state['matcher'], state['router']
             if model is not None and routes is not None:
-                store = CorrectionStore(db, index_context(data_dir, model, routes))
+                store = CorrectionStore(db, index_context(data_dir, model, routes), getattr(model, 'dim', 384))
                 state['store'] = store
                 if state['base_snapshot'] is None:
                     state['base_snapshot'] = model.snapshot()
@@ -252,7 +252,8 @@ def create_app(data_dir=None, matcher=None, router=None, clock=time.monotonic,
                     }) from None
                 vector = np.asarray(result.pop('vector'), dtype=np.float32)
                 norm = np.linalg.norm(vector.astype(np.float64))
-                if vector.shape != (384,) or not np.isfinite(vector).all() or not np.isfinite(norm) or norm == 0:
+                if (vector.shape != (getattr(model, 'dim', 384),) or not np.isfinite(vector).all()
+                        or not np.isfinite(norm) or norm == 0):
                     raise ValueError('Invalid ML vector')
                 vector = (vector / norm).astype(np.float32)
                 # Enforce the public contract even if the ML result has diagnostics.

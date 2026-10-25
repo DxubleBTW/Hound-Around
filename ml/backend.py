@@ -17,7 +17,7 @@ import networkx as nx
 import numpy as np
 
 from ml import calibration
-from ml.embedder import DIM, MODEL_NAME, as_embed_fn
+from ml.embedder import DIM, MODEL_NAME, as_embed_fn, projected_model_name, with_projection
 from ml.index import VectorIndex
 from ml.errors import UnrecognizedLocation
 from ml.rejection import load_threshold, threshold_value
@@ -49,7 +49,7 @@ class Backend:
     Parameters mirror what ``create_backend`` builds, but every heavy piece is
     injectable for tests:
 
-    - ``embed_fn``: callable ``(image|list) -> normalized float32 (384,)/(N,384)``.
+    - ``embed_fn``: callable ``(image|list) -> normalized float32 (D,)/(N,D)`` with ``D == index.dim``.
     - ``ocr_reader``: callable ``(image) -> (room|None, floor|None)`` or ``None``.
     """
 
@@ -102,6 +102,11 @@ class Backend:
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    @property
+    def dim(self) -> int:
+        """Descriptor width of this index (384 for DINOv2-small; MegaLoc 8,448 or its PCA width)."""
+        return self.index.dim
 
     @property
     def size(self) -> int:
@@ -170,7 +175,7 @@ class Backend:
 
         top3 = [{'spot': r['spot'], 'votes': int(r['votes'])} for r in ranked[:3]]
         span = len({self._floor.get(t['spot']) for t in top3}) > 1
-        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote))
+        p = calibration.p_correct(self._features(spot, confidence, span, *first_vote), self.model_name)
         result = self._result(vector, spot, floor, confidence, top3, ocr_room, ocr_floor, rows)
         return {**result, 'p_correct': round(p, 3), 'tier': calibration.tier(p, span)}
 
@@ -314,7 +319,23 @@ def create_backend(data_dir, embedder=None, ocr_reader=None, top_k: int = TOP_K,
     embed_fn = _resolve_embedder(embedder)
     reader = _resolve_ocr(ocr_reader)
 
-    model_name = getattr(embedder, 'model_name', MODEL_NAME) if embedder is not None else MODEL_NAME
+    # The index decides the descriptor width. A PCA stored in the index is applied
+    # to every query; without one, the embedder must already match. Fail closed:
+    # a width mismatch would make every vote meaningless.
+    base_name = getattr(embed_fn, 'model_name', MODEL_NAME)
+    if index.model_name and index.model_name != base_name:
+        raise ValueError('Index descriptor identity does not match HOUND_EMBEDDER; rebuild the index')
+    embed_dim = getattr(embed_fn, 'dim', None)
+    if embed_dim is None:  # older embedders: measure once on a tiny image
+        from PIL import Image
+        embed_dim = int(np.asarray(embed_fn(Image.new('RGB', (32, 32), (128, 128, 128)))).reshape(-1).shape[0])
+    expected_in = index.pca.in_dim if index.pca is not None else index.dim
+    if embed_dim != expected_in:
+        raise ValueError(f'{index_path} expects {expected_in}-d descriptors ({base_name} gives {embed_dim}-d); '
+                         f'set HOUND_EMBEDDER to the model the index was built with, or rebuild it')
+    embed_fn = with_projection(embed_fn, index.pca)
+    model_name = projected_model_name(base_name, index.pca)
+    calibration.coefficients(model_name)  # refuse an uncalibrated MegaLoc variant at startup
     return Backend(index, graph, headings, embed_fn, ocr_reader=reader,
                    model_name=model_name, top_k=top_k,
                    min_similarity=load_threshold(data_dir, index_path, model_name),
@@ -325,16 +346,16 @@ def _resolve_embedder(embedder):
     """Return a batch-capable embed callable, constructing DINOv2 if needed.
 
     An embedder is a callable handling a single PIL image or a list, returning
-    L2-normalized float32 ``(384,)`` / ``(N, 384)``. :class:`ml.embedder.Dinov2Embedder`
-    and the test fakes both satisfy this. A per-image-only callable can opt into
-    wrapping by setting ``batched = False``.
+    L2-normalized float32 ``(D,)`` / ``(N, D)``. :class:`ml.embedder.Dinov2Embedder`,
+    :class:`ml.embedder.MegalocEmbedder` and the test fakes all satisfy this. A
+    per-image-only callable can opt into wrapping by setting ``batched = False``.
     """
     if embedder is None:
-        from ml.embedder import Dinov2Embedder  # lazy: imports torch here
-        embedder = Dinov2Embedder()
+        from ml.embedder import make_embedder  # lazy: imports torch here
+        embedder = make_embedder()
     if getattr(embedder, 'batched', True):
         return embedder
-    return as_embed_fn(embedder)
+    return as_embed_fn(embedder, getattr(embedder, 'dim', DIM))
 
 
 def _resolve_ocr(ocr_reader):

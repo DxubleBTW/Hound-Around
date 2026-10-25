@@ -55,6 +55,7 @@ def main() -> int:
                 repo_id=repo_id,
                 filename=filename,
                 repo_type='dataset',
+                revision=os.environ.get('HOUND_DATA_REVISION') or None,
                 token=token,
                 local_dir=str(data_dir),
             )

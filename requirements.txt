@@ -2,7 +2,9 @@
 # Runtime recognition deps (ship to the HF Space). Imported lazily by ml/* so
 # the test suite stays green without them installed. The Dockerfile installs the
 # CPU-only torch build via --index-url https://download.pytorch.org/whl/cpu.
-torch>=2.2,<3          # DINOv2 inference in ml/embedder.py (CPU wheels on the Space)
+torch==2.6.0          # match the measured MegaLoc runtime (CPU wheels on the Space)
+torchvision==0.21.0
+Pillow==12.3.0        # keep square-resize pixels consistent with the reference index
 transformers>=4.44,<5  # loads facebook/dinov2-small in ml/embedder.py
 easyocr>=1.7,<2        # room/floor OCR in ml/ocr.py
 huggingface_hub>=0.24,<1  # downloads private graph/rooms/index at Space startup
