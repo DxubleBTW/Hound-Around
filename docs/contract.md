@@ -60,6 +60,14 @@ GET /health    → {"ok":true,"index_size":2213,"model":"dinov2-small"}
 `legs` draws the route: one leg per floor, split at elevators/stairs (riding through a floor is one exit).
 `points` are the path's nodes normalized to that leg's own bounding box (0–1, aspect kept, 10% padding), so no
 building coordinates, floor plan or other nodes ever reach the client. The last leg's `exit` is null.
+Each leg also has `nodes` (the path's node ids, aligned with `points`) and `branches`: per point, the openings
+beside the path as unit directions only, e.g. `[{"dx":0,"dy":-1,"kind":"hall"}]` (`kind`: hall, door, stairs,
+elevator, entrance). The app draws walls along the path with short faded stubs at openings; no length, name or
+position of anything off the path is sent.
+
+Each step has `passes`: landmarks beside the hallway while walking it, in order, at most 3, e.g.
+`[{"name":"the restrooms","side":"left"}]` (empty for elevator/stairs steps). A floor change reads
+`Take the elevator to 2, then head toward <where you step out to>`.
 
 Route instructions start with one of: `Walk`, `Continue`, `Turn left and walk`, `Turn right and walk`,
 `Turn around and walk`, `Take the elevator to`, `Take the stairs to`. A turn needs at least 45° (150° for
