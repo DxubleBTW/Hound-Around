@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 
 const KEY = 'hound.theme'
-const BG = { dark: '#0B0B0C', light: '#F1F1EE' }
+const BG = { dark: '#000000', light: '#F4F4F1' }
 
 export const currentTheme = () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
 
@@ -20,9 +20,11 @@ function apply(theme) {
 export function switchTheme(theme, from) {
   try { localStorage.setItem(KEY, theme) } catch { /* not remembered, still switches */ }
   const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    || document.documentElement.dataset.motion === 'off'
   if (still) return apply(theme)
   if (document.startViewTransition) {
-    const x = from?.x ?? window.innerWidth / 2, y = from?.y ?? 0
+    const x = from?.x ?? window.innerWidth / 2
+    const y = from?.y ?? 0
     const r = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y))
     const t = document.startViewTransition(() => apply(theme))
     t.ready.then(() => document.documentElement.animate(

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { locate } from '../api.js'
-import Icon from '../components/Icon.jsx'
-import PhotoLoader from '../components/PhotoLoader.jsx'
-import { Button, Sheet, TextAction, TopBar } from '../components/ui.jsx'
 
-// `previous`: the first photo's photo_id when this is the "turn around and snap
-// once more" photo; the backend adds both photos' votes.
+// Two plain frames behind the photo give the stack its depth. They are not
+// matched images: only the user's own photo is ever shown.
+const STACK = [
+  { '--r': '-6deg', '--sx': '-44px', '--sy': '30px', '--sr': '-18deg', background: 'var(--color-panel)' },
+  { '--r': '5deg', '--sx': '46px', '--sy': '24px', '--sr': '16deg', background: 'var(--color-rule)', animationDelay: '60ms' },
+]
+
 export default function Locating({ photo, previous, onDone, onCancel, onManual, api, buildingLabel = 'the selected building' }) {
   const [error, setError] = useState('')
   const [stage, setStage] = useState('sending') // 'sending' -> 'matching'
@@ -39,63 +41,64 @@ export default function Locating({ photo, previous, onDone, onCancel, onManual, 
     }
   }, [photo.blob, api, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const unknown = error?.code === 'unrecognized_location'
-  if (!error) {
-    return (
-      <PhotoLoader photoUrl={photo.url} flash={false}
-        title={stage === 'sending' ? 'Sending your photo…' : 'Finding your spot…'}
-        detail={stage === 'sending' ? 'Uploading it now. It’s deleted right after matching.' : `${previous ? 'Combining both photos' : 'Comparing it'} with hallway views in ${buildingLabel}.`}
-        steps={[
-          { label: 'Photo ready', state: 'done' },
-          { label: 'Photo sent', state: stage === 'sending' ? 'now' : 'done' },
-          { label: 'Matching hallway views', state: stage === 'matching' ? 'now' : 'todo' },
-        ]} />
-    )
-  }
+  const unrecognized = error?.code === 'unrecognized_location'
+
   return (
-    <main className="rise flex flex-1 flex-col">
-      <TopBar onBack={onCancel} backLabel="Cancel and retake photo" title={error ? '' : 'Finding your spot'} />
-      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl bg-edge shadow-[var(--shadow-float)]">
-        <img src={photo.url} alt="Your hallway photo" className="h-full w-full object-cover" />
-        {!error && <div className="scan-line absolute inset-x-0 h-0.5 bg-white shadow-[0_0_0_1px_rgb(204_0_0/.8)]" />}
+    <main className="flex flex-1 flex-col gap-6 pt-6">
+      <div className="relative mx-auto aspect-[3/4] w-[58%] max-w-[230px]">
+        {STACK.map((style, i) => <span key={i} aria-hidden className="settle absolute inset-0 rounded-[2px]" style={style} />)}
+        <div className="settle absolute inset-0 overflow-hidden rounded-[2px] bg-panel" style={{ '--sy': '40px', animationDelay: '120ms' }}>
+          <img src={photo.url} alt="Your hallway photo" className={`h-full w-full object-cover ${error ? 'opacity-50' : ''}`} />
+          {!error && <span aria-hidden className="scan absolute inset-x-0 h-[2px] bg-snow/80" />}
+        </div>
       </div>
 
-      <Sheet>
-        {!error ? (
-          <div role="status">
-            <div className="relative -mx-5 -mt-5 mb-5 h-1 overflow-hidden rounded-t-[28px] bg-tint"><span className="progress-bar rounded-full bg-fg" /></div>
-            <p className="font-display text-[22px] font-bold">{stage === 'sending' ? 'Sending your photo…' : 'Matching…'}</p>
-            <p className="mt-1 text-[15px] text-dim">
-              {stage === 'sending' ? 'Uploading your photo.' : `Comparing your photo to hallway views in ${buildingLabel}.`}
+      {!error ? (
+        <div role="status" aria-live="polite" className="space-y-5">
+          <div className="space-y-2">
+            <h2 className="font-display text-[40px] font-semibold leading-none">{stage === 'sending' ? 'Sending' : 'Matching'}</h2>
+            <p className="text-[17px] leading-snug text-mist">
+              {previous ? 'Combining both photos' : 'Comparing your photo'} with hallway views in {buildingLabel}. This usually takes a second.
             </p>
-            <ul className="mt-5 space-y-3 text-[15px]">
-              <li className="flex items-center gap-3">
-                <span className={`flex h-7 w-7 items-center justify-center rounded-full ${stage === 'sending' ? 'bg-tint' : 'bg-fg text-ink'}`}>
-                  {stage === 'sending' ? <span className="pulse-soft h-2 w-2 rounded-full bg-fg" aria-hidden /> : <Icon name="check" size={16} strokeWidth={2.6} />}
-                </span>
-                <span>Photo sent</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <span className={`flex h-7 w-7 items-center justify-center rounded-full ${stage === 'matching' ? 'bg-tint' : 'bg-raise'}`}>
-                  <span className={`h-2 w-2 rounded-full ${stage === 'matching' ? 'pulse-soft bg-fg' : 'bg-faint'}`} aria-hidden />
-                </span>
-                <span className={stage === 'matching' ? '' : 'text-dim'}>Finding your spot</span>
-              </li>
-            </ul>
           </div>
-        ) : (
-          <div>
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-tint text-rose"><Icon name="pin" size={22} /></span>
-            <p className="font-display mt-4 text-balance text-[22px] font-bold">{unknown ? 'We don’t recognize this spot' : 'Hmm, no match yet'}</p>
-            <p role="alert" className="mt-1 break-words text-[15px] text-dim">{error.message || 'Please try another photo.'}</p>
-            <div className="mt-5 flex flex-col gap-2">
-              <Button onClick={unknown ? onCancel : () => setAttempt((a) => a + 1)} className="w-full">{unknown ? 'Take another photo' : 'Try again'}</Button>
-              <Button variant="secondary" onClick={onManual} className="w-full">Use the manual locator</Button>
-              {!unknown && <TextAction onClick={onCancel} className="self-center">Retake photo</TextAction>}
-            </div>
-          </div>
+          <ul className="space-y-3 text-base">
+            <li className="flex items-center gap-3">
+              {stage === 'sending'
+                ? <span aria-hidden className="grid w-[18px] place-items-center"><span className="breathe block h-2.5 w-2.5 rounded-full bg-snow" /></span>
+                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden><path d="M5 12l5 5 9-10" /></svg>}
+              {stage === 'sending' ? 'Sending your photo' : 'Photo sent'}
+            </li>
+            <li className={`flex items-center gap-3 ${stage === 'sending' ? 'text-dim' : ''}`}>
+              <span aria-hidden className="grid w-[18px] place-items-center">
+                {stage === 'sending'
+                  ? <span className="block h-2.5 w-2.5 rounded-full border-[1.5px] border-dim" />
+                  : <span className="breathe block h-2.5 w-2.5 rounded-full bg-snow" />}
+              </span>
+              Finding your spot
+            </li>
+          </ul>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <h2 className="font-display text-[36px] font-semibold leading-[1.02]">{unrecognized ? 'We don’t recognize this spot' : 'No match yet'}</h2>
+          <p role="alert" className="break-words text-[17px] leading-snug text-mist">{error.message || 'Please try another photo.'}</p>
+        </div>
+      )}
+
+      <div className="mt-auto space-y-2">
+        {error && (
+          <button onClick={unrecognized ? onCancel : () => setAttempt((a) => a + 1)}
+            className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night">
+            {unrecognized ? 'Take another photo' : 'Try again'}
+          </button>
         )}
-      </Sheet>
+        {error && (
+          <button onClick={onManual} className="min-h-[44px] w-full text-base underline underline-offset-[3px]">Type the room you’re next to</button>
+        )}
+        {(!error || !unrecognized) && (
+          <button onClick={onCancel} className="min-h-[44px] w-full text-base underline underline-offset-[3px]">{error ? 'Retake photo' : 'Cancel'}</button>
+        )}
+      </div>
     </main>
   )
 }
