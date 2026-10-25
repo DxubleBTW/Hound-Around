@@ -20,13 +20,20 @@ function needsPicker(loc) {
   return loc.confidence < PICKER_THRESHOLD || floors.size > 1
 }
 
+// Short floor mark for the badge: LL, 1, 2.
+function floorMark(spot) {
+  const c = floorOf(spot).code
+  return c === 'B1' ? 'LL' : String(c).replace('F', '')
+}
+
+const linkClass = 'min-h-[44px] text-base underline underline-offset-[3px] disabled:text-dim'
+
 export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api, buildingLabel = 'the selected building' }) {
   const [picking, setPicking] = useState(() => needsPicker(loc))
   const [saving, setSaving] = useState('')
   const [failure, setFailure] = useState(null)
   const pending = useRef(null)
   const strength = Math.round((loc.confidence || 0) * 100)
-  const filled = Math.round((loc.confidence || 0) * 10)
   const maxVotes = Math.max(1, ...(loc.top3 || []).map((t) => t.votes || 0))
 
   useEffect(() => () => pending.current?.abort(), [])
@@ -34,23 +41,24 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
   // Extremely uncertain answer: preserve the retake fallback and offer manual routing.
   if (isIrrelevant(loc)) {
     return (
-      <main className="rise flex flex-1 flex-col justify-center text-center">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-scarlet/10 text-scarlet" aria-hidden>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v3" /><path d="M11 14h.01" />
+      <main className="flex flex-1 flex-col pt-8">
+        <div className="flex flex-1 flex-col justify-center gap-5">
+          <svg width="132" height="120" viewBox="0 0 132 120" aria-hidden>
+            <path d="M8 104 H54 L76 82 V22" fill="none" stroke="#7A1F2B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M76 22 V6" fill="none" stroke="#7A1F2B" strokeWidth="3" strokeDasharray="3 7" strokeLinecap="round" />
+            <circle cx="76" cy="54" r="11" fill="#000" stroke="#fff" strokeWidth="3" />
+            <text x="76" y="60" textAnchor="middle" fontFamily="Jost, sans-serif" fontSize="15" fontWeight="600" fill="#fff">?</text>
+            <circle cx="30" cy="104" r="7" fill="#CC0000" />
           </svg>
+          <h2 className="font-display text-[38px] font-semibold leading-[1.02]">We can’t tell where this is</h2>
+          <p className="max-w-[32ch] text-[17px] leading-snug text-mist">
+            Make sure you’re inside {buildingLabel}. Then point your camera down a hallway or at a room-number sign.
+          </p>
         </div>
-        <h2 className="mt-6 font-display text-3xl font-extrabold leading-tight">Hmm — I can’t tell<br />where this is.</h2>
-        <p className="mt-3 text-muted">
-          Point your camera down a hallway or at a room-number sign, and make sure you’re inside {buildingLabel}.
-        </p>
-        <button
-          onClick={onRetake}
-          className="mt-8 min-h-[44px] w-full rounded-2xl bg-scarlet py-4 font-display text-lg font-bold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet"
-        >
-          Take another photo
-        </button>
-        <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
+        <div className="space-y-2 pt-6">
+          <button onClick={onRetake} className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night">Take another photo</button>
+          <button onClick={onManual} className={`${linkClass} w-full`}>Type the room you’re next to</button>
+        </div>
       </main>
     )
   }
@@ -64,7 +72,7 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
     setSaving(spot)
     try {
       const res = await (api?.correct || correct)(loc.photo_id, spot, { signal: controller.signal })
-      // Surface the new index size so the toast can read "N frames indexed".
+      // Surface the new index size so the toast can show the growing count.
       if (!controller.signal.aborted) onConfirm(spot, res?.index_size ?? true)
     } catch (error) {
       if (!controller.signal.aborted) setFailure({ spot, error })
@@ -75,102 +83,89 @@ export default function Confirm({ photo, loc, onConfirm, onRetake, onManual, api
   }
 
   return (
-    <main className="rise flex flex-1 flex-col">
-      <div className="mt-4 flex items-center gap-4">
-        <img src={photo.url} alt="" className="h-20 w-16 rounded-xl object-cover" />
-        <div>
-          {picking
-            ? <h2 className="font-display text-2xl font-extrabold leading-tight">Hmm, not sure.<br />Which spot is this?</h2>
-            : <p className="text-sm font-medium text-muted">You’re at</p>}
-          {!picking && (
-            <>
-              <h2 className="font-display text-3xl font-extrabold leading-tight">{spotName(loc.spot)}</h2>
-              <span className="mt-1 inline-block rounded-full bg-scarlet/10 px-2.5 py-0.5 text-sm font-semibold text-scarlet">
-                {floorName(loc.floor)}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {!picking && (
-        <div className="mt-6 rounded-2xl border border-line bg-white p-4 shadow-sm">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="text-muted">Match strength</span>
-            <span className="font-display text-lg font-extrabold text-scarlet">{strength}%</span>
+    <main className="flex flex-1 flex-col gap-6 pt-6">
+      {!picking ? (
+        <>
+          <div className="flex items-center gap-4">
+            <img src={photo.url} alt="" className="h-24 w-[72px] shrink-0 rounded-[2px] object-cover" />
+            <div className="min-w-0">
+              <p className="text-sm text-mist">You’re at</p>
+              <h2 className="font-display text-[32px] font-semibold leading-[1.05]">{spotName(loc.spot)}</h2>
+              <span className="mt-2 inline-flex rounded-[3px] bg-maroon px-2 py-0.5 text-sm font-bold">{floorName(loc.floor)}</span>
+            </div>
           </div>
-          <div className="mt-2 flex gap-1" role="img" aria-label={`Match strength ${strength} percent`}>
-            {Array.from({ length: 10 }).map((_, i) => (
-              <span key={i} className="h-2.5 flex-1 overflow-hidden rounded-full bg-line">
-                {i < filled && <span className="grow-x block h-full w-full rounded-full bg-scarlet" style={{ animationDelay: `${i * 0.04}s` }} />}
-              </span>
-            ))}
+          <div>
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-mist">Match strength</span>
+              <span className="font-bold">{strength}%</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-rule" role="img" aria-label={`Match strength ${strength} percent`}>
+              <div className="grow-x h-full bg-maroon-line" style={{ width: `${strength}%` }} />
+            </div>
+            {loc.ocr_room && <p className="mt-3 text-sm text-mist">Saw a sign for Room {loc.ocr_room}.</p>}
           </div>
-          {loc.ocr_room && <p className="mt-3 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>}
-        </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-2.5">
+            <h2 className="font-display text-[38px] font-semibold leading-[1.02]">Which spot is this?</h2>
+            <p className="text-[17px] leading-snug text-mist">The match wasn’t strong enough to be sure. Pick where you’re standing.</p>
+            {loc.ocr_room && <p className="text-sm text-mist">Saw a sign for Room {loc.ocr_room}.</p>}
+          </div>
+          <ul className="space-y-2">
+            {(loc.top3 || []).map((t, i) => {
+              const first = i === 0
+              return (
+                <li key={t.spot}>
+                  <button onClick={() => pick(t.spot)} disabled={!!saving}
+                    className={`press relative flex min-h-[76px] w-full items-center gap-3.5 overflow-hidden rounded-sm px-3.5 text-left disabled:opacity-60 ${first ? 'bg-snow text-night' : 'bg-wine text-snow'}`}>
+                    <span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[3px] bg-maroon font-display text-[21px] font-semibold text-snow">{floorMark(t.spot)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[17px] font-bold leading-snug">{spotName(t.spot)}</span>
+                      <span className={`block text-sm ${first ? 'text-[#4A4A4A]' : 'text-mist'}`}>
+                        {saving === t.spot ? 'Saving…' : `${floorName(floorOf(t.spot).code === 'B1' ? -1 : Number(floorMark(t.spot)))}${first ? '. Closest match.' : ''}`}
+                      </span>
+                    </span>
+                    <span aria-hidden className="grow-x absolute bottom-0 left-0 h-[3px] bg-maroon-line"
+                      style={{ width: `${Math.round(((t.votes || 0) / maxVotes) * 100)}%`, animationDelay: `${i * 60}ms` }} />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          {!failure && <p className="text-sm text-mist">Your pick teaches the app this spot for next time.</p>}
+        </>
       )}
 
-      {picking && loc.ocr_room && (
-        <p className="mt-4 text-sm text-muted">Saw sign: Room {loc.ocr_room}</p>
-      )}
-
-      {picking && (
-        <ul className="mt-6 space-y-3">
-          {(loc.top3 || []).map((t, i) => (
-            <li key={t.spot}>
-              <button onClick={() => pick(t.spot)} disabled={!!saving}
-                className="relative flex w-full items-center justify-between overflow-hidden rounded-2xl border border-line bg-white px-4 py-4 text-left shadow-sm transition active:scale-[.99] active:border-scarlet disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">
-                {/* Vote bar fills proportionally to the strongest candidate. */}
-                <span aria-hidden className="grow-x absolute inset-y-0 left-0 bg-scarlet/5" style={{ width: `${Math.round((t.votes / maxVotes) * 100)}%`, animationDelay: `${i * 0.06}s` }} />
-                <span className="relative">
-                  <span className="block font-semibold">{spotName(t.spot)}</span>
-                  <span className="block text-sm text-muted">{floorName(floorNum(t.spot))}{i === 0 ? ' · best guess' : ''}</span>
-                </span>
-                <span className="relative text-sm font-medium text-muted">{saving === t.spot ? 'Saving…' : `${t.votes} votes`}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-auto space-y-3 pt-8">
+      <div className="mt-auto space-y-2">
         {failure && (
-          <div className="space-y-3 rounded-2xl border border-line bg-white p-4">
+          <div className="enter space-y-3 rounded-sm bg-panel p-4">
             <div role="alert">
-              <p className="font-semibold">Couldn’t confirm your correction was saved</p>
-              <p className="mt-1 text-sm text-muted">{failure.error.message || 'Please try again.'}</p>
+              <p className="font-bold">We couldn’t confirm your correction was saved</p>
+              <p className="mt-1 text-sm text-mist">{failure.error.message || 'Please try again.'}</p>
             </div>
             {failure.error.retryable && (
-              <button onClick={() => pick(failure.spot)} disabled={!!saving}
-                className="min-h-[44px] w-full rounded-xl border border-line py-3 font-semibold disabled:opacity-60">
-                Try saving again
-              </button>
+              <button onClick={() => pick(failure.spot)} disabled={!!saving} className={`${linkClass} block`}>Try saving again</button>
             )}
             <button onClick={() => onConfirm(failure.spot, null)} disabled={!!saving}
-              className="min-h-[44px] w-full rounded-xl bg-scarlet py-3 font-semibold text-white disabled:opacity-60">
+              className="press min-h-[48px] w-full rounded-sm bg-snow font-display text-[17px] font-semibold text-night disabled:opacity-60">
               Continue from {spotName(failure.spot)}
             </button>
           </div>
         )}
-        {!picking ? (
+        {!picking && (
           <>
-            <p className="text-center font-display text-lg font-bold">Right spot?</p>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setPicking(true)} className="min-h-[44px] rounded-2xl border border-line bg-white py-4 font-semibold shadow-sm transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Not quite</button>
-              <button onClick={() => pick(loc.spot)} className="min-h-[44px] rounded-2xl bg-scarlet py-4 font-semibold text-white shadow-[0_12px_28px_-10px_rgba(204,0,0,.6)] transition active:scale-[.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-scarlet">Yes, route me</button>
-            </div>
+            <p className="font-display text-xl font-semibold">Right spot?</p>
+            <button onClick={() => pick(loc.spot)}
+              className="press min-h-[56px] w-full rounded-sm bg-snow font-display text-[19px] font-semibold text-night">Yes, route me</button>
+            <button onClick={() => setPicking(true)} className={`${linkClass} w-full`}>Not quite. Pick another spot</button>
           </>
-        ) : !failure && (
-          <p className="text-center text-sm text-muted">Your pick teaches the app this spot for next time.</p>
         )}
-        <button onClick={onRetake} className="min-h-[44px] w-full py-3 text-sm font-medium text-muted">None of these. Retake photo</button>
-        <button onClick={onManual} className="min-h-[44px] w-full py-3 font-semibold">Choose my starting location</button>
+        <div className="flex justify-between gap-4">
+          <button onClick={onRetake} className={linkClass}>Retake photo</button>
+          <button onClick={onManual} className={`${linkClass} text-right`}>Type the room you’re next to</button>
+        </div>
       </div>
     </main>
   )
-}
-
-function floorNum(spot) {
-  const c = floorOf(spot).code
-  return c === 'B1' ? -1 : Number(c.replace('F', '')) || null
 }

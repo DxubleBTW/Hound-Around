@@ -4,9 +4,13 @@ import Locating from './screens/Locating.jsx'
 import Confirm from './screens/Confirm.jsx'
 import Route from './screens/Route.jsx'
 import PawBurst from './components/PawBurst.jsx'
+import Paw from './components/Paw.jsx'
+import StepLine from './components/StepLine.jsx'
+import Opening, { shouldShowOpening } from './components/Opening.jsx'
 import ManualStart from './screens/ManualStart.jsx'
 import { createApi } from './api.js'
 import { buildingConfig } from './lib/campuses.js'
+import { motionPaused, setMotionPaused } from './lib/motion.js'
 import CampusPicker from './screens/CampusPicker.jsx'
 
 // Read ?to=164 so a QR code on the demo slide can pre-fill the destination.
@@ -16,23 +20,40 @@ function initialDest(fallback) {
   return to && to.trim() ? to.trim() : fallback
 }
 
+// Which station of the step line each screen sits at. Manual start skips the line.
+const STEP_OF = { snap: 0, locating: 1, confirm: 2, route: 3 }
+
 // Four screens: Snap → Locating → Confirm ("Right spot?") → Route (one step at a time).
 export default function App() {
   const env = import.meta.env || {}
   const [selection, setSelection] = useState({ school: 'bu', building: 'cds' })
   const [choosing, setChoosing] = useState(false)
+  const [opening, setOpening] = useState(shouldShowOpening)
+  const [paused, setPaused] = useState(motionPaused)
   const building = buildingConfig(selection.school, selection.building, env)
   const api = useMemo(() => createApi(building?.apiBase || ''), [building?.apiBase])
+
+  useEffect(() => { setMotionPaused(paused) }, [paused])
+  const motion = { paused, toggle: () => setPaused((p) => !p) }
+
+  let body
   if (choosing || !building?.available) {
-    return <CampusPicker current={building || { schoolId: 'bu' }} env={env}
+    body = <CampusPicker current={building || { schoolId: 'bu' }} env={env}
       onCancel={() => setChoosing(false)}
       onSelect={(school, id) => { setSelection({ school, building: id }); setChoosing(false) }} />
+  } else {
+    body = <Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
+      motion={motion} onSchoolChange={() => setChoosing(true)} />
   }
-  return <Navigation key={`${selection.school}:${selection.building}`} api={api} building={building}
-    onSchoolChange={() => setChoosing(true)} />
+  return (
+    <>
+      {body}
+      {opening && <Opening onDone={() => setOpening(false)} />}
+    </>
+  )
 }
 
-function Navigation({ api, building, onSchoolChange }) {
+function Navigation({ api, building, motion, onSchoolChange }) {
   const { MOCK, health } = api
   const [screen, setScreen] = useState('snap')
   const [dest, setDest] = useState(() => {
@@ -43,7 +64,7 @@ function Navigation({ api, building, onSchoolChange }) {
   const [photo, setPhoto] = useState(null) // { blob, url }
   const [loc, setLoc] = useState(null) // /locate response
   const [here, setHere] = useState(null) // confirmed spot
-  const [toast, setToast] = useState(null) // { msg, celebrate }
+  const [toast, setToast] = useState(null) // { msg, detail, celebrate }
 
   // Server status from GET /health: 'checking' | 'waking' (reachable, model still loading) | 'ok' | 'down'.
   const [server, setServer] = useState(MOCK ? 'ok' : 'checking')
@@ -51,7 +72,7 @@ function Navigation({ api, building, onSchoolChange }) {
 
   useEffect(() => () => { if (photo?.url) URL.revokeObjectURL(photo.url) }, [photo?.url])
 
-  const flash = (msg, celebrate = false) => { setToast({ msg, celebrate }); setTimeout(() => setToast(null), 2600) }
+  const flash = (msg, detail = '', celebrate = false) => { setToast({ msg, detail, celebrate }); setTimeout(() => setToast(null), 3200) }
 
   // Hugging Face Spaces sleep when idle; the first request wakes them. Poll /health until ready (max ~2 min).
   useEffect(() => {
@@ -81,86 +102,107 @@ function Navigation({ api, building, onSchoolChange }) {
     setPhoto(null); setLoc(null); setHere(null); setScreen('manual')
   }
 
-  const statusPill =
-    MOCK ? { tone: 'muted', text: 'Demo data · backend not connected' }
-    : server === 'checking' ? { tone: 'muted', text: 'Connecting to Hound Around…', live: true }
-    : server === 'waking' ? { tone: 'muted', text: 'Server waking up, about 30 s…', live: true }
-    : server === 'down' ? { tone: 'muted', text: 'Can’t reach the server right now' }
-    : model.startsWith('stub') ? { tone: 'alert', text: 'Test backend · not real recognition' }
+  const status =
+    MOCK ? { text: 'Demo data. The backend isn’t connected.' }
+    : server === 'checking' ? { text: 'Connecting to Hound Around…', live: true }
+    : server === 'waking' ? { text: 'The server is waking up. About 30 seconds.', live: true }
+    : server === 'down' ? { text: 'Can’t reach the server right now. Try again in a minute.' }
+    : model.startsWith('stub') ? { text: 'Test backend. This isn’t real recognition.' }
     : null
 
+  const step = STEP_OF[screen]
+
   return (
-    <div className="mx-auto flex min-h-full max-w-md flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-      <button onClick={onSchoolChange} className="mb-2 min-h-[44px] self-start text-left text-sm font-semibold">
-        {building.schoolName} · {building.shortName || building.name} · Change school
-      </button>
-      {statusPill && (
-        <div
-          role="status"
-          className={`mb-2 flex items-center gap-1.5 self-center rounded-full px-3 py-1 text-[11px] font-medium ${
-            statusPill.tone === 'alert' ? 'bg-scarlet/10 text-scarlet' : 'bg-ink/5 text-muted'
-          }`}
-        >
-          {statusPill.live && <span className="pulse-soft inline-block h-1.5 w-1.5 rounded-full bg-scarlet" />}
-          {statusPill.text}
+    <div className="mx-auto flex min-h-full max-w-md flex-col px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Paw size={22} color="#FFFFFF" />
+            <span className="font-display text-xl font-semibold leading-none">Hound Around</span>
+          </div>
+          <button onClick={onSchoolChange}
+            className="flex min-h-[36px] items-center text-left text-sm text-mist underline decoration-rule underline-offset-[3px] hover:text-snow">
+            In {building.shortName || building.name}, {building.schoolName}
+          </button>
         </div>
+        <button type="button" onClick={motion.toggle} aria-pressed={motion.paused}
+          aria-label={motion.paused ? 'Play motion' : 'Pause motion'}
+          className="press -mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-sm text-snow hover:bg-panel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            {motion.paused ? <path d="M8 5.5v13l10-6.5z" fill="currentColor" /> : <path d="M9 6v12M15 6v12" />}
+          </svg>
+        </button>
+      </header>
+
+      {status && (
+        <p role="status" className="mt-1 flex items-center gap-2 text-sm text-mist">
+          {status.live && <span aria-hidden className="breathe inline-block h-2 w-2 rounded-full bg-snow" />}
+          {status.text}
+        </p>
       )}
 
-      {screen === 'snap' && (
-        <Snap
-          dest={dest} setDest={setDest}
-          accessible={accessible} setAccessible={setAccessible}
-          onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
-          onManual={chooseStart}
-          destinations={building.destinations}
-          destinationGroups={building.destinationGroups}
-          resolvePlace={building.resolvePlace}
-        />
-      )}
-      {screen === 'locating' && (
-        <Locating
-          photo={photo}
-          onDone={(r) => { setLoc(r); setScreen('confirm') }}
-          onCancel={restart}
-          onManual={chooseStart}
-          api={api}
-          buildingLabel={building.shortName || building.name}
-        />
-      )}
-      {screen === 'confirm' && (
-        <Confirm
-          photo={photo} loc={loc}
-          onConfirm={(spot, learned) => {
-            setHere(spot)
-            if (learned) {
-              const size = Number.isFinite(learned) ? learned : null
-              flash(size ? `Thanks, it learned that. ${size} frames indexed.` : 'Thanks, it learned that.', true)
-            }
-            setScreen('route')
-          }}
-          onRetake={restart}
-          onManual={chooseStart}
-          api={api}
-          buildingLabel={building.shortName || building.name}
-        />
-      )}
-      {screen === 'manual' && (
-        <ManualStart landmarks={building.landmarks} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
-      )}
-      {screen === 'route' && (
-        <Route
-          from={here} heading={here === loc?.spot ? loc?.heading : undefined}
-          dest={dest} accessible={accessible}
-          onRestart={restart}
-          api={api}
-          resolvePlace={building.resolvePlace}
-        />
-      )}
+      {step !== undefined && <div className="mt-5"><StepLine current={step} /></div>}
+
+      <div key={screen} className="enter flex flex-1 flex-col">
+        {screen === 'snap' && (
+          <Snap
+            dest={dest} setDest={setDest}
+            accessible={accessible} setAccessible={setAccessible}
+            onPhoto={(p) => { setPhoto(p); setScreen('locating') }}
+            onManual={chooseStart}
+            destinations={building.destinations}
+            destinationGroups={building.destinationGroups}
+            resolvePlace={building.resolvePlace}
+          />
+        )}
+        {screen === 'locating' && (
+          <Locating
+            photo={photo}
+            onDone={(r) => { setLoc(r); setScreen('confirm') }}
+            onCancel={restart}
+            onManual={chooseStart}
+            api={api}
+            buildingLabel={building.shortName || building.name}
+          />
+        )}
+        {screen === 'confirm' && (
+          <Confirm
+            photo={photo} loc={loc}
+            onConfirm={(spot, learned) => {
+              setHere(spot)
+              if (learned) {
+                const size = Number.isFinite(learned) ? learned : null
+                flash('Got it. The next person here gets it right.', size ? `Hallway views: ${size.toLocaleString()}` : '', true)
+              }
+              setScreen('route')
+            }}
+            onRetake={restart}
+            onManual={chooseStart}
+            api={api}
+            buildingLabel={building.shortName || building.name}
+          />
+        )}
+        {screen === 'manual' && (
+          <ManualStart landmarks={building.landmarks} accessible={accessible} onCancel={restart} onStart={(start) => { setHere(start); setScreen('route') }} />
+        )}
+        {screen === 'route' && (
+          <Route
+            from={here} heading={here === loc?.spot ? loc?.heading : undefined}
+            dest={dest} accessible={accessible}
+            onRestart={restart}
+            api={api}
+            resolvePlace={building.resolvePlace}
+          />
+        )}
+      </div>
 
       {toast && (
-        <div className="rise fixed inset-x-4 bottom-6 mx-auto flex max-w-sm items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-left text-sm font-medium text-paper shadow-[0_18px_40px_-12px_rgba(26,20,20,.6)]">
+        <div role="status" className="toast-in fixed inset-x-5 bottom-[max(1.5rem,env(safe-area-inset-bottom))] mx-auto flex max-w-sm items-center gap-3 rounded-sm bg-panel px-4 py-3.5 text-left">
           {toast.celebrate && <PawBurst size={34} className="shrink-0" />}
-          <span className="flex-1">{toast.msg}</span>
+          <span className="flex-1">
+            <span className="block font-display text-[17px] font-semibold leading-tight">{toast.msg}</span>
+            {toast.detail && <span className="mt-0.5 block text-sm text-mist">{toast.detail}</span>}
+          </span>
         </div>
       )}
     </div>
